@@ -111,10 +111,8 @@ func aeadEncryptChaCha20Poly1305(
 	nonce *[12]byte,
 	outPtr uint32,
 ) uint32 {
-	// 限制最大明文长度 (RFC 8439: 2^38 - 64 字节)
-	// 使用 uint64 避免溢出
-	const maxPlaintextLen uint64 = (1 << 38) - 64
-	if uint64(plaintextLen) > maxPlaintextLen {
+	// 限制最大明文长度 (2^38 - 64 字节，RFC 8439)
+	if plaintextLen > ((1 << 38) - 64) {
 		return 0
 	}
 	
