@@ -4,6 +4,7 @@
  */
 
 import { handleSession, handleStream, handleUpload, handleFin, handleClose } from './poll-handler';
+import { SUDOKU_SITE_HTML } from './site';
 import sudokuWasmModule from '../sudoku.wasm';
 
 export interface Env {
@@ -107,8 +108,11 @@ export default {
         case '/api/close':
           return await handleClose(request, env, wasm);
         default:
-          console.log(`[404] Path not found: ${pathname}`);
-          return new Response(`Not Found: ${pathname}`, { status: 404 });
+          console.log(`[404] Fake site served: ${pathname}`);
+          return new Response(SUDOKU_SITE_HTML, {
+            status: 200,
+            headers: { 'Content-Type': 'text/html;charset=UTF-8' },
+          });
       }
     } catch (err: any) {
       console.error(`[Unhandled Error] ${err?.message || err}`);
