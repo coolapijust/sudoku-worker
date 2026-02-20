@@ -19,14 +19,15 @@ export async function handleSession(
   env: Env,
   wasm: any
 ): Promise<Response> {
-  if (request.method !== 'POST') {
+  // 允许 GET 和 POST 方法
+  if (request.method !== 'POST' && request.method !== 'GET') {
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  // 验证认证
+  // 验证认证 - 使用实际请求方法
   const auth = new TunnelAuth(env.SUDOKU_KEY);
   const { header, query } = extractAuth(request);
-  const isValid = await auth.verify(header, query, 'poll', 'POST', '/session');
+  const isValid = await auth.verify(header, query, 'poll', request.method, '/session');
   if (!isValid) {
     return new Response('Unauthorized', { status: 401 });
   }
