@@ -39,6 +39,51 @@ export class SudokuAEAD {
     return new Uint8Array(plaintext);
   }
 
+  // 简化的 encrypt/decrypt 方法（用于 poll-handler）
+  encrypt(data: Uint8Array): Uint8Array | null {
+    try {
+      const ptr = this.wasm.arenaMalloc(data.length);
+      if (!ptr) return null;
+      
+      const memory = new Uint8Array(this.wasm.memory.buffer);
+      memory.set(data, ptr);
+      
+      const outPtr = this.wasm.encrypt(this.sessionId, ptr, data.length);
+      const outLen = this.wasm.getOutLen();
+      
+      const result = new Uint8Array(outLen);
+      result.set(memory.subarray(outPtr, outPtr + outLen));
+      
+      this.wasm.arenaFree(ptr);
+      return result;
+    } catch (e) {
+      console.error('[AEAD] Encrypt error:', e);
+      return null;
+    }
+  }
+
+  decrypt(data: Uint8Array): Uint8Array | null {
+    try {
+      const ptr = this.wasm.arenaMalloc(data.length);
+      if (!ptr) return null;
+      
+      const memory = new Uint8Array(this.wasm.memory.buffer);
+      memory.set(data, ptr);
+      
+      const outPtr = this.wasm.decrypt(this.sessionId, ptr, data.length);
+      const outLen = this.wasm.getOutLen();
+      
+      const result = new Uint8Array(outLen);
+      result.set(memory.subarray(outPtr, outPtr + outLen));
+      
+      this.wasm.arenaFree(ptr);
+      return result;
+    } catch (e) {
+      console.error('[AEAD] Decrypt error:', e);
+      return null;
+    }
+  }
+
   private maskData(data: Uint8Array): Uint8Array {
     const ptr = this.wasm.arenaMalloc(data.length);
     if (!ptr) throw new Error('Alloc failed');
