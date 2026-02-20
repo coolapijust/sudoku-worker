@@ -20,50 +20,90 @@ interface Env {
 
 // 全局 WASM 实例缓存（避免每次请求都重新实例化）
 let wasmInstanceCache: WebAssembly.Instance | null = null;
+let wasmMemoryCache: WebAssembly.Memory | null = null;
 
 async function getWasmInstance(): Promise<WebAssembly.Instance> {
-  if (wasmInstanceCache) {
+  if (wasmInstanceCache && wasmMemoryCache) {
     return wasmInstanceCache;
   }
   
-  // 实例化 WASM 模块 - 添加 WASI 支持
-  const instance = await WebAssembly.instantiate(sudokuWasmModule, {
-    wasi_snapshot_preview1: {
-      // WASI 标准函数存根
-      fd_close: () => 0,
-      fd_write: () => 0,
-      fd_seek: () => 0,
-      fd_fdstat_get: () => 0,
-      fd_prestat_get: () => 0,
-      fd_prestat_dir_name: () => 0,
-      environ_sizes_get: () => 0,
-      environ_get: () => 0,
-      args_sizes_get: () => 0,
-      args_get: () => 0,
-      proc_exit: (code: number) => { throw new Error(`Exit ${code}`); },
-      clock_time_get: () => 0,
-      random_get: (buf: number, len: number) => {
-        // 提供随机数
-        const memory = (instance.exports as any).memory as WebAssembly.Memory;
-        const arr = new Uint8Array(memory.buffer, buf, len);
-        crypto.getRandomValues(arr);
-        return 0;
+  console.log('[WASM] Starting instantiation...');
+  
+  try {
+    // 实例化 WASM 模块 - 添加 WASI 支持
+    const instance = await WebAssembly.instantiate(sudokuWasmModule, {
+      wasi_snapshot_preview1: {
+        // WASI 标准函数存根
+        fd_close: () => 0,
+        fd_write: () => 0,
+        fd_seek: () => 0,
+        fd_fdstat_get: () => 0,
+        fd_prestat_get: () => 0,
+        fd_prestat_dir_name: () => 0,
+        environ_sizes_get: () => 0,
+        environ_get: () => 0,
+        args_sizes_get: () => 0,
+        args_get: () => 0,
+        proc_exit: (code: number) => { 
+          console.error(`[WASM] proc_exit called with code ${code}`);
+          throw new Error(`Exit ${code}`); 
+        },
+        clock_time_get: () => 0,
+        random_get: (buf: number, len: number) => {
+          // 使用缓存的 memory
+          if (!wasmMemoryCache) {
+            console.error('[WASM] random_get called before memory initialized');
+            return 0;
+          }
+          try {
+            const arr = new Uint8Array(wasmMemoryCache.buffer, buf, len);
+            crypto.getRandomValues(arr);
+            return 0;
+          } catch (e) {
+            console.error('[WASM] random_get error:', e);
+            return 0;
+          }
+        },
       },
-    },
-    env: { 
-      abort: (msg: number, file: number, line: number, col: number) => {
-        console.error(`[WASM Abort] at ${file}:${line}:${col}`);
-        throw new Error('Wasm abort'); 
+      env: { 
+        abort: (msg: number, file: number, line: number, col: number) => {
+          console.error(`[WASM Abort] msg=${msg}, file=${file}, line=${line}, col=${col}`);
+          throw new Error('Wasm abort'); 
+        }
+      }
+    });
+    
+    console.log('[WASM] Instantiation successful');
+    
+    // 获取 memory 并缓存
+    const exports = instance.exports as any;
+    if (!exports.memory) {
+      throw new Error('WASM exports.memory not found');
+    }
+    wasmMemoryCache = exports.memory as WebAssembly.Memory;
+    console.log(`[WASM] Memory size: ${wasmMemoryCache.buffer.byteLength} bytes`);
+    
+    // 检查必要的导出函数
+    const required = ['arenaMalloc', 'arenaFree', 'initSession', 'closeSession', 'mask', 'unmask'];
+    for (const name of required) {
+      if (typeof exports[name] !== 'function') {
+        throw new Error(`WASM missing required export: ${name}`);
       }
     }
-  });
-  
-  wasmInstanceCache = instance;
-  return instance;
+    console.log('[WASM] All required exports found');
+    
+    wasmInstanceCache = instance;
+    return instance;
+  } catch (err) {
+    console.error('[WASM] Instantiation failed:', err);
+    throw err;
+  }
 }
 
 export const onRequest: PagesFunction<Env> = async (context) => {
   const { request, env } = context;
+  
+  console.log(`[Sudoku] Request received: ${request.method} ${request.url}`);
   
   // 检查 WebSocket 升级
   const upgradeHeader = request.headers.get('Upgrade');
@@ -80,12 +120,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     // 获取 WASM 实例
     const wasmInstance = await getWasmInstance();
     const wasmExports = wasmInstance.exports as any;
-    
-    // 检查必要的导出函数
-    if (!wasmExports.arenaMalloc || !wasmExports.initSession) {
-      console.error('[Sudoku] WASM missing required exports');
-      return new Response('WASM module invalid', { status: 500 });
-    }
     
     console.log('[Sudoku] WASM loaded successfully');
     
@@ -117,7 +151,6 @@ async function handleSudokuConnection(
   
   const keyHex = env.SUDOKU_KEY;
   console.log(`[Sudoku] Key length: ${keyHex?.length || 0}`);
-  console.log(`[Sudoku] Key first 8 chars: ${keyHex?.substring(0, 8) || 'undefined'}...`);
   
   if (!keyHex || keyHex.length !== 64) {
     console.error(`[Sudoku] Invalid key: length=${keyHex?.length}, expected=64`);
@@ -138,6 +171,8 @@ async function handleSudokuConnection(
     return;
   }
   
+  console.log(`[Sudoku] Memory allocated at ${keyPtr}`);
+  
   try {
     const memory = new Uint8Array(wasm.memory.buffer);
     memory.set(keyBytes, keyPtr);
@@ -157,7 +192,7 @@ async function handleSudokuConnection(
       return;
     }
     
-    console.log(`[Sudoku] Session ${sessionId}`);
+    console.log(`[Sudoku] Session ${sessionId} created`);
     
     // 连接上游
     let upstreamSocket: Socket;
