@@ -1,25 +1,18 @@
-# Cloudflare Pages 配置
-# Sudoku Protocol - Pages Functions
-
-name = "sudoku-wasm-pages"
+name = "sudoku-worker"
+main = "src/index.ts"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Pages 构建输出目录
-pages_build_output_dir = "./static"
+[build]
+command = ""
 
-# =============================================================================
-# 环境变量 (非敏感)
-# =============================================================================
+# WASM 模块绑定 - 使用内联表格式
+wasm_modules = { SUDOKU_WASM = "./sudoku.wasm" }
+
 [vars]
-UPSTREAM_HOST = "127.0.0.1"
-CIPHER_METHOD = "chacha20-poly1305"
+CIPHER_METHOD = "aes-128-gcm"
 LAYOUT_MODE = "ascii"
-KEY_DERIVE_SALT = "sudoku-v2-edge-salt"
-ED25519_PUBLIC_KEY = ""
 
-# =============================================================================
-# Secrets (通过 Dashboard 设置)
-# =============================================================================
-# SUDOKU_KEY - AEAD 对称密钥 (32 字节 hex = 64 字符)
-# ED25519_PRIVATE_KEY - Ed25519 私钥 (32 字节 hex = 64 字符，可选)
+# 环境变量需要在 Cloudflare Dashboard 中设置：
+# - SUDOKU_KEY: 64位十六进制密钥
+# - UPSTREAM_HOST: 上游服务器地址

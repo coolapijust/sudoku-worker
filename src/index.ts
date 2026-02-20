@@ -1,184 +1,122 @@
 /**
- * Sudoku Protocol - Cloudflare Worker with TinyGo WASM
- * 
- * WASM Module Integration:
- * - Loads sudoku.wasm compiled from TinyGo
- * - Exports: arenaMalloc, arenaFree, initSession, closeSession, mask, unmask, etc.
+ * Sudoku Protocol - Cloudflare Worker
+ * 支持 Poll 模式 HTTP Tunnel
  */
 
-// WASM module instance
-let wasmModule: WebAssembly.Module | null = null;
-let wasmInstance: WebAssembly.Instance | null = null;
-let wasmExports: any = null;
+import { handleSession, handleStream, handleUpload, handleFin, handleClose } from './poll-handler';
 
-// WASM memory
-let wasmMemory: WebAssembly.Memory | null = null;
-
-/**
- * Initialize WASM module
- */
-async function initWasm(): Promise<void> {
-  if (wasmInstance) return;
-  
-  // Load WASM module from binding
-  const wasmModuleBinding = (globalThis as any).SUDOKU_WASM;
-  if (!wasmModuleBinding) {
-    throw new Error('SUDOKU_WASM module not found. Check wrangler.toml configuration.');
+// WASM 模块通过 wrangler.toml 的 wasm_modules 配置绑定
+// 在 Workers 环境中通过 env.SUDOKU_WASM 访问
+declare global {
+  interface Env {
+    SUDOKU_WASM: WebAssembly.Module;
+    SUDOKU_KEY: string;
+    UPSTREAM_HOST: string;
+    CIPHER_METHOD: string;
+    LAYOUT_MODE: string;
   }
-  
-  // Instantiate WASM with memory
-  wasmMemory = new WebAssembly.Memory({
-    initial: 16,  // 1MB (16 * 64KB pages)
-    maximum: 256  // 16MB max
-  });
-  
-  const importObject = {
-    env: {
-      memory: wasmMemory,
-    }
-  };
-  
-  wasmInstance = await WebAssembly.instantiate(wasmModuleBinding, importObject);
-  wasmExports = wasmInstance.exports;
-  
-  console.log('[WASM] Module initialized successfully');
 }
 
-/**
- * Get exported WASM functions
- */
-function getWasmExports() {
-  if (!wasmExports) {
-    throw new Error('WASM not initialized');
-  }
-  return wasmExports;
+export interface Env {
+  SUDOKU_WASM: WebAssembly.Module;
+  SUDOKU_KEY: string;
+  UPSTREAM_HOST: string;
+  CIPHER_METHOD: string;
+  LAYOUT_MODE: string;
 }
 
-/**
- * WASM wrapper functions
- */
-export const sudokuWasm = {
-  /**
-   * Initialize the WASM module
-   */
-  async init(): Promise<void> {
-    await initWasm();
-  },
+let wasmInstanceCache: WebAssembly.Instance | null = null;
+let wasmMemoryCache: WebAssembly.Memory | null = null;
 
-  /**
-   * Allocate memory in WASM arena
-   */
-  arenaMalloc(size: number): number {
-    return getWasmExports().arenaMalloc(size);
-  },
+export async function getWasmInstance(env: Env): Promise<WebAssembly.Instance> {
+  if (wasmInstanceCache && wasmMemoryCache) {
+    return wasmInstanceCache;
+  }
 
-  /**
-   * Free memory in WASM arena
-   */
-  arenaFree(ptr: number): void {
-    getWasmExports().arenaFree(ptr);
-  },
-
-  /**
-   * Initialize a session
-   */
-  initSession(
-    id: number,
-    keyPtr: number,
-    keyLen: number,
-    cipherType: number,
-    nonceSize: number,
-    tagSize: number,
-    layoutType: number,
-    padPoolSize: number
-  ): number {
-    return getWasmExports().initSession(
-      id, keyPtr, keyLen, cipherType, nonceSize, tagSize, layoutType, padPoolSize
-    );
-  },
-
-  /**
-   * Close a session
-   */
-  closeSession(id: number): void {
-    getWasmExports().closeSession(id);
-  },
-
-  /**
-   * Mask (encode) data
-   */
-  mask(id: number, inPtr: number, inLen: number): number {
-    return getWasmExports().mask(id, inPtr, inLen);
-  },
-
-  /**
-   * Unmask (decode) data
-   */
-  unmask(id: number, inPtr: number, inLen: number): number {
-    return getWasmExports().unmask(id, inPtr, inLen);
-  },
-
-  /**
-   * Get output length
-   */
-  getOutLen(): number {
-    return getWasmExports().getOutLen();
-  },
-
-  /**
-   * Get arena pointer
-   */
-  getArenaPtr(): number {
-    return getWasmExports().getArenaPtr();
-  },
-
-  /**
-   * Get session address
-   */
-  getSessionAddr(id: number): number {
-    return getWasmExports().getSessionAddr(id);
-  },
-
-  /**
-   * Get work buffer address
-   */
-  getWorkBuf(): number {
-    return getWasmExports().getWorkBuf();
-  },
-
-  /**
-   * Get output buffer address
-   */
-  getOutBuf(): number {
-    return getWasmExports().getOutBuf();
-  },
-
-  /**
-   * Get WASM memory buffer
-   */
-  getMemoryBuffer(): ArrayBuffer {
-    if (!wasmMemory) {
-      throw new Error('WASM memory not initialized');
+  try {
+    const wasmModule = env.SUDOKU_WASM;
+    if (!wasmModule) {
+      throw new Error('SUDOKU_WASM not found in environment');
     }
-    return wasmMemory.buffer;
-  },
 
-  /**
-   * Write data to WASM memory
-   */
-  writeToMemory(ptr: number, data: Uint8Array): void {
-    const memory = new Uint8Array(this.getMemoryBuffer());
-    memory.set(data, ptr);
-  },
+    const instantiated = await WebAssembly.instantiate(wasmModule, {
+      wasi_snapshot_preview1: {
+        fd_close: () => 0,
+        fd_write: () => 0,
+        fd_seek: () => 0,
+        fd_fdstat_get: () => 0,
+        fd_prestat_get: () => 0,
+        fd_prestat_dir_name: () => 0,
+        environ_sizes_get: () => 0,
+        environ_get: () => 0,
+        args_sizes_get: () => 0,
+        args_get: () => 0,
+        proc_exit: (code: number) => { throw new Error(`Exit ${code}`); },
+        clock_time_get: () => 0,
+        random_get: (buf: number, len: number) => {
+          if (!wasmMemoryCache) return 0;
+          try {
+            const arr = new Uint8Array(wasmMemoryCache.buffer, buf, len);
+            crypto.getRandomValues(arr);
+            return 0;
+          } catch (e) { return 0; }
+        },
+      },
+      env: {
+        abort: () => { throw new Error('Wasm abort'); }
+      }
+    });
 
-  /**
-   * Read data from WASM memory
-   */
-  readFromMemory(ptr: number, len: number): Uint8Array {
-    const memory = new Uint8Array(this.getMemoryBuffer());
-    return memory.slice(ptr, ptr + len);
+    let instance: WebAssembly.Instance;
+    if ('instance' in instantiated) {
+      instance = (instantiated as any).instance;
+    } else {
+      instance = instantiated as WebAssembly.Instance;
+    }
+
+    const exports = instance.exports as any;
+    wasmMemoryCache = exports.memory as WebAssembly.Memory;
+
+    if (exports.initWasm) {
+      exports.initWasm();
+    }
+
+    wasmInstanceCache = instance;
+    return instance;
+  } catch (err) {
+    console.error('[WASM] Instantiation failed:', err);
+    throw err;
+  }
+}
+
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+    const pathname = url.pathname;
+
+    // 获取 WASM 实例
+    let wasm: any;
+    try {
+      const wasmInstance = await getWasmInstance(env);
+      wasm = wasmInstance.exports;
+    } catch (err) {
+      return new Response(`WASM Error: ${err}`, { status: 500 });
+    }
+
+    // Poll 模式端点
+    switch (pathname) {
+      case '/session':
+        return handleSession(request, env, wasm);
+      case '/stream':
+        return handleStream(request, env);
+      case '/api/v1/upload':
+        return handleUpload(request, env);
+      case '/fin':
+        return handleFin(request, env);
+      case '/close':
+        return handleClose(request, env, wasm);
+      default:
+        return new Response('Not Found', { status: 404 });
+    }
   }
 };
-
-// Export for use in other modules
-export default sudokuWasm;
