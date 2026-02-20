@@ -11,8 +11,6 @@
  * - AES-128-GCM: Worker Web Crypto API
  */
 
-import { connect } from 'cloudflare:sockets';
-
 // 研究站 HTML (反引号已替换为单引号)
 const SUDOKU_SITE_HTML = `<!DOCTYPE html>
 <html lang="en" class="dark">
@@ -937,4 +935,11 @@ export default {
   },
 };
 
-// Types are provided by @cloudflare/workers-types
+declare global {
+  interface WebSocketPair { 0: WebSocket; 1: WebSocket; }
+  var WebSocketPair: { new (): WebSocketPair; };
+  interface Socket { readable: ReadableStream<Uint8Array>; writable: WritableStream<Uint8Array>; close(): void; }
+  interface SocketOptions { secureTransport: 'on' | 'off' | 'starttls'; }
+  function connect(address: string, options?: SocketOptions): Socket;
+  interface ExecutionContext { waitUntil(promise: Promise<unknown>): void; }
+}

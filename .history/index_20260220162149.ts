@@ -11,8 +11,6 @@
  * - AES-128-GCM: Worker Web Crypto API
  */
 
-import { connect } from 'cloudflare:sockets';
-
 // 研究站 HTML (反引号已替换为单引号)
 const SUDOKU_SITE_HTML = `<!DOCTYPE html>
 <html lang="en" class="dark">
