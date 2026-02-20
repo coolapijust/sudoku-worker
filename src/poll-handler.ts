@@ -8,8 +8,8 @@ import { createSession, getSession, deleteSession, generateSessionId } from './p
 import { SudokuAEAD, hexToBytes, getCipherType, getLayoutType } from './sudoku-aead';
 import { connect } from 'cloudflare:sockets';
 
-const UPSTREAM_HOST = '127.0.0.1'; // 从环境变量获取
-const UPSTREAM_PORT = 443;
+// 默认配置
+const DEFAULT_UPSTREAM_PORT = 443;
 
 /**
  * 处理 /session 端点 - 初始化会话
@@ -59,18 +59,22 @@ export async function handleSession(
     const httpSessionId = generateSessionId();
     const session = createSession(httpSessionId, aead);
 
-    // 连接到上游
-    try {
-      const upstreamHost = env.UPSTREAM_HOST || UPSTREAM_HOST;
-      session.upstreamSocket = connect({ hostname: upstreamHost, port: UPSTREAM_PORT });
-      
-      // 启动上游读取循环
-      handleUpstreamRead(session);
-    } catch (err) {
-      deleteSession(httpSessionId);
-      wasm.closeSession(sessionId);
-      wasm.arenaFree(keyPtr);
-      return new Response('Upstream connect failed', { status: 502 });
+    // 连接到上游（如果配置了）
+    if (env.UPSTREAM_HOST) {
+      try {
+        session.upstreamSocket = connect({ 
+          hostname: env.UPSTREAM_HOST, 
+          port: DEFAULT_UPSTREAM_PORT 
+        });
+        
+        // 启动上游读取循环
+        handleUpstreamRead(session);
+      } catch (err) {
+        deleteSession(httpSessionId);
+        wasm.closeSession(sessionId);
+        wasm.arenaFree(keyPtr);
+        return new Response('Upstream connect failed', { status: 502 });
+      }
     }
 
     // 生成响应 URL
