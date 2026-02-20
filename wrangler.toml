@@ -3,8 +3,8 @@ main = "src/index.ts"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-[build]
-command = ""
+# 构建命令 - Cloudflare 自动处理 TypeScript
+# 不需要额外配置，Wrangler 会自动编译 src/index.ts
 
 # WASM 模块绑定 - 使用内联表格式
 wasm_modules = { SUDOKU_WASM = "./sudoku.wasm" }
