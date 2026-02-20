@@ -1,0 +1,241 @@
+# Cloudflare Worker 手动部署指南
+
+## 方式一：通过 Cloudflare Dashboard 部署（推荐）
+
+### 步骤 1：创建 Worker
+
+1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com)
+2. 进入 **Workers & Pages**
+3. 点击 **Create application**
+4. 选择 **Upload an asset** 或 **Create a Service**
+
+### 步骤 2：从 GitHub 导入
+
+1. 在创建页面选择 **Connect to Git**
+2. 授权 Cloudflare 访问你的 GitHub 账号
+3. 选择仓库：`coolapijust/sudoku-worker`
+4. 选择分支：`main`
+5. 配置构建设置：
+   - **Build command**: `npm install && npx tsc`
+   - **Deploy command**: 留空（Cloudflare 会自动处理）
+
+### 步骤 3：配置 WASM 模块
+
+由于 Cloudflare Dashboard 上传方式对 WASM 支持有限，建议使用 **Wrangler CLI** 或直接在 Dashboard 中：
+
+1. 进入 Worker 的 **Settings** → **Variables**
+2. 在 **WASM modules** 部分上传 `sudoku.wasm` 文件
+3. 绑定名称设置为：`SUDOKU_WASM`
+
+### 步骤 4：配置环境变量
+
+在 Worker 的 **Settings** → **Variables** 中配置：
+
+#### 普通变量 (Variables)
+
+| 变量名 | 值 | 说明 |
+|--------|-----|------|
+| `UPSTREAM_HOST` | `127.0.0.1` | 上游服务器地址 |
+| `UPSTREAM_PORT` | `8080` | 上游服务器端口 |
+| `CIPHER_METHOD` | `chacha20-poly1305` | 加密方式 |
+| `LAYOUT_MODE` | `ascii` | 布局模式 |
+| `KEY_DERIVE_SALT` | `sudoku-v2-edge-salt` | 密钥派生盐值 |
+| `ED25519_PUBLIC_KEY` | *(可选)* | Ed25519 公钥 (64字符hex) |
+
+#### 加密变量 (Secrets)
+
+点击 **Add** → **Encrypt**：
+
+| 变量名 | 值 |
+|--------|-----|
+| `SUDOKU_KEY` | `cc6aff06410039f12142d6c2d633a99161513e1009a3e6a34f4bb3424d1b5c64` |
+| `ED25519_PRIVATE_KEY` | *(可选)* `f517c12b7cb4fbea4e4d7167e1caae5ba0040be4e613e6a6d5884e598e3003d5` |
+
+### 步骤 5：部署
+
+点击 **Save and Deploy**
+
+---
+
+## 方式二：使用 Wrangler CLI（需要解决权限问题）
+
+### 前置条件
+
+1. 安装 Node.js 18+
+2. 安装 Wrangler:
+   ```bash
+   npm install -g wrangler
+   ```
+
+### 解决 Windows 权限问题
+
+如果遇到 `EPERM: operation not permitted` 错误：
+
+```powershell
+# 以管理员身份运行 PowerShell
+# 创建配置目录
+mkdir -Force "$env:APPDATA/xdg.config/.wrangler/config"
+mkdir -Force "$env:APPDATA/xdg.config/.wrangler/logs"
+
+# 设置权限
+$path = "$env:APPDATA/xdg.config/.wrangler/config"
+$user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+icacls $path /grant "${user}:F" /T
+```
+
+### 登录 Cloudflare
+
+```bash
+wrangler login
+```
+
+浏览器会打开授权页面，完成后返回终端。
+
+### 设置 Secrets
+
+```bash
+# 开发环境
+wrangler secret put SUDOKU_KEY --env dev
+# 输入: cc6aff06410039f12142d6c2d633a99161513e1009a3e6a34f4bb3424d1b5c64
+
+wrangler secret put ED25519_PRIVATE_KEY --env dev
+# 输入: f517c12b7cb4fbea4e4d7167e1caae5ba0040be4e613e6a6d5884e598e3003d5
+
+# 生产环境
+wrangler secret put SUDOKU_KEY --env production
+wrangler secret put ED25519_PRIVATE_KEY --env production
+```
+
+### 部署
+
+```bash
+# 开发环境
+wrangler deploy --env dev
+
+# 生产环境
+wrangler deploy --env production
+```
+
+---
+
+## 方式三：直接上传编译产物
+
+### 步骤 1：准备文件
+
+确保以下文件已准备好：
+- `dist/index.js` - 编译后的主文件
+- `sudoku.wasm` - WASM 模块
+- `wrangler.toml` - 配置文件
+
+### 步骤 2：使用 Dashboard 上传
+
+1. 进入 Worker 的 **Quick Edit**
+2. 删除默认代码
+3. 复制 `dist/index.js` 的内容粘贴进去
+4. 点击 **Save and Deploy**
+
+### 步骤 3：绑定 WASM 模块
+
+1. 进入 **Settings** → **Variables**
+2. 找到 **WASM modules** 部分
+3. 上传 `sudoku.wasm`，命名为 `SUDOKU_WASM`
+
+### 步骤 4：配置变量和 Secrets
+
+同方式一的步骤 4。
+
+---
+
+## 验证部署
+
+部署成功后，访问 Worker 的 URL：
+
+```
+https://sudoku-wasm-bridge-dev.<你的子域名>.workers.dev
+```
+
+### 测试端点
+
+1. **研究站页面**: 直接访问根路径 `/`
+2. **WebSocket 代理**: 访问 `/v2/stream`
+
+---
+
+## 故障排查
+
+### 问题 1: WASM 模块未找到
+
+**错误**: `SUDOKU_WASM module not found`
+
+**解决**: 确保在 Dashboard 的 Variables 中正确上传了 `sudoku.wasm` 并命名为 `SUDOKU_WASM`。
+
+### 问题 2: 导出函数未找到
+
+**错误**: `wasm.exports.arenaMalloc is not a function`
+
+**解决**: 确保使用的是最新编译的 `sudoku.wasm`，函数名已更新为 `arenaMalloc` / `arenaFree`。
+
+### 问题 3: Secrets 未设置
+
+**错误**: `Secret not found`
+
+**解决**: 在 Dashboard 的 Variables → Encrypt 中添加 `SUDOKU_KEY`。
+
+### 问题 4: 上游连接失败
+
+**错误**: `Upstream connection failed`
+
+**解决**: 检查 `UPSTREAM_HOST` 和 `UPSTREAM_PORT` 变量是否正确设置。
+
+---
+
+## 定义的密码变量
+
+以下是本项目使用的密码变量：
+
+### 1. SUDOKU_KEY（必需）
+
+- **用途**: AEAD 加密密钥 (ChaCha20-Poly1305 / AES-GCM)
+- **格式**: 32字节 hex = 64字符
+- **当前值**: `cc6aff06410039f12142d6c2d633a99161513e1009a3e6a34f4bb3424d1b5c64`
+- **生成方式**: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+
+### 2. ED25519_PRIVATE_KEY（可选）
+
+- **用途**: Worker 身份签名
+- **格式**: 32字节 hex = 64字符
+- **当前值**: `f517c12b7cb4fbea4e4d7167e1caae5ba0040be4e613e6a6d5884e598e3003d5`
+- **生成方式**: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+
+### 3. ED25519_PUBLIC_KEY（可选，普通变量）
+
+- **用途**: 验证 Worker 身份
+- **格式**: 32字节 hex = 64字符
+- **生成方式**: 从私钥派生
+
+---
+
+## 项目文件说明
+
+```
+sudoku-worker/
+├── .github/workflows/build.yml  # GitHub Actions 自动编译
+├── src/
+│   └── index.ts                 # WASM 加载模块
+├── dist/
+│   └── index.js                 # 编译后的主文件
+├── sudoku.wasm                  # TinyGo 编译的 WASM 模块
+├── wrangler.toml                # Cloudflare 配置
+├── index.ts                     # Worker 主入口
+├── package.json                 # Node.js 依赖
+├── DEPLOY.md                    # 部署指南
+└── MANUAL_DEPLOY.md             # 本文件
+```
+
+---
+
+##  GitHub 仓库
+
+- **URL**: https://github.com/coolapijust/sudoku-worker
+- **分支**: main
+- **WASM 编译**: 通过 GitHub Actions 自动完成
