@@ -2,12 +2,10 @@
  * Sudoku Protocol - Cloudflare Pages Function
  * WebSocket 代理端点: /api/stream
  * 
- * WASM 模块通过 ESM import 直接加载（Pages Functions 推荐方式）
+ * WASM 模块通过 fetch 动态加载
  */
 
 import { connect } from 'cloudflare:sockets';
-// ESM 方式导入 WASM 模块
-import sudokuWasmModule from '../../sudoku.wasm';
 
 interface Env {
   SUDOKU_KEY: string;
@@ -28,24 +26,24 @@ async function getWasmInstance(): Promise<WebAssembly.Instance> {
   }
 
   console.log('[WASM] Starting instantiation...');
-  console.log(`[WASM] Module type: ${typeof sudokuWasmModule}`);
-  console.log(`[WASM] Module constructor: ${sudokuWasmModule?.constructor?.name}`);
   
   try {
-    // 检查模块类型并正确处理
-    let module: WebAssembly.Module;
-    if (sudokuWasmModule instanceof WebAssembly.Module) {
-      module = sudokuWasmModule;
-      console.log('[WASM] Module is WebAssembly.Module');
-    } else if (sudokuWasmModule instanceof ArrayBuffer || sudokuWasmModule instanceof Uint8Array) {
-      console.log('[WASM] Module is ArrayBuffer/Uint8Array, compiling...');
-      module = await WebAssembly.compile(sudokuWasmModule);
-    } else {
-      console.log('[WASM] Trying to use module directly:', sudokuWasmModule);
-      module = sudokuWasmModule as any;
+    // 动态加载 WASM 文件
+    console.log('[WASM] Fetching WASM module...');
+    const wasmResponse = await fetch('https://raw.githubusercontent.com/coolapijust/sudoku-worker/main/sudoku.wasm');
+    if (!wasmResponse.ok) {
+      throw new Error(`Failed to fetch WASM: ${wasmResponse.status}`);
     }
+    const wasmBuffer = await wasmResponse.arrayBuffer();
+    console.log(`[WASM] Fetched ${wasmBuffer.byteLength} bytes`);
+    
+    // 编译 WASM 模块
+    console.log('[WASM] Compiling module...');
+    const module = await WebAssembly.compile(wasmBuffer);
+    console.log('[WASM] Module compiled successfully');
     
     // 实例化 WASM 模块 - 添加 WASI 支持
+    console.log('[WASM] Instantiating...');
     const instantiated = await WebAssembly.instantiate(module, {
       wasi_snapshot_preview1: {
         // WASI 标准函数存根
