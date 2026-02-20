@@ -24,6 +24,11 @@ export async function handleSession(
     return new Response('Method Not Allowed', { status: 405 });
   }
 
+  // 检查环境变量
+  if (!env.SUDOKU_KEY) {
+    return new Response('SUDOKU_KEY not configured', { status: 500 });
+  }
+
   // 验证认证 - 使用实际请求方法
   const auth = new TunnelAuth(env.SUDOKU_KEY);
   const { header, query } = extractAuth(request);
