@@ -147,17 +147,9 @@ func arenaFree(ptr uint32) {
 // 参数: keyPtr, keyLen, cipherType, layoutType
 // 返回值: sessionId (>=0 成功, <0 失败)
 func initSession(keyPtr uint32, keyLen uint32, cipherType uint8, layoutType uint8) int32 {
-	// 查找空闲 session
-	var id int32 = -1
-	for i := int32(0); i < maxSessions; i++ {
-		if sessionUsed[i] == 0 {
-			id = i
-			break
-		}
-	}
-	if id < 0 {
-		return -1 // 无可用 session
-	}
+	// 简化：直接使用 session 0
+	const id int32 = 0
+	
 	if keyLen > 32 {
 		return -2 // 密钥过长
 	}
