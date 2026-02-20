@@ -164,8 +164,10 @@ async function handleSudokuStream(
 5. 配置构建设置：
    - **Framework preset**: None
    - **Build command**: 留空（或 `echo "No build"`）
-   - **Build output directory**: `static`
+   - **Build output directory**: `static`（如果创建了 static 目录）或留空
 6. 点击 **Save and Deploy**
+
+> **注意**: `Build output directory` 是 Pages 发布静态文件的目录。如果不需要静态页面（纯 API），可以留空。我们创建了 `static/index.html` 作为状态页面，所以设置为 `static`。
 
 ### 步骤 7：设置 Secrets
 
