@@ -7,9 +7,11 @@ import { SudokuAEAD } from './sudoku-aead';
 export async function handleSudokuHandshake(
   ws: WebSocket,
   aead: SudokuAEAD,
-  timeoutMs: number = 5000
+  timeoutMs: number = 5000,
+  messageBuffer: ArrayBuffer[] = []
 ): Promise<{ success: boolean; error?: string }> {
   console.log('[Handshake] Starting handshake process...');
+  console.log(`[Handshake] Pre-buffered messages: ${messageBuffer.length}`);
 
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -18,23 +20,21 @@ export async function handleSudokuHandshake(
     }, timeoutMs);
 
     let handshakeReceived = false;
+    let modeReceived = false;
 
-    const messageHandler = async (event: MessageEvent) => {
+    const processHandshake = async (data: ArrayBuffer) => {
       if (handshakeReceived) return;
       handshakeReceived = true;
 
-      console.log('[Handshake] Received first message from client');
+      console.log('[Handshake] Processing handshake data');
+      console.log(`[Handshake] Message size: ${data.byteLength} bytes`);
 
       try {
-        const data = event.data as ArrayBuffer;
-        console.log(`[Handshake] Message size: ${data.byteLength} bytes`);
-
         const handshakePlain = await aead.unmaskAndDecrypt(new Uint8Array(data));
         console.log(`[Handshake] Decrypted handshake length: ${handshakePlain.length}`);
 
         if (handshakePlain.length < 16) {
           clearTimeout(timer);
-          ws.removeEventListener('message', messageHandler);
           console.error(`[Handshake] Invalid handshake length: ${handshakePlain.length}, expected >= 16`);
           resolve({ success: false, error: 'Invalid handshake length' });
           return;
@@ -48,7 +48,6 @@ export async function handleSudokuHandshake(
 
         if (diff > 60n) {
           clearTimeout(timer);
-          ws.removeEventListener('message', messageHandler);
           console.error(`[Handshake] Time skew too large: ${diff}s`);
           resolve({ success: false, error: 'Time skew/replay' });
           return;
@@ -57,6 +56,7 @@ export async function handleSudokuHandshake(
         console.log('[Handshake] Timestamp verified');
 
         if (handshakePlain.length >= 17) {
+          // 握手和模式在同一个消息中
           const clientMode = handshakePlain[16];
           const serverMode = 0x02;
 
@@ -64,67 +64,84 @@ export async function handleSudokuHandshake(
 
           if (clientMode !== serverMode) {
             clearTimeout(timer);
-            ws.removeEventListener('message', messageHandler);
             console.error(`[Handshake] Mode mismatch: client=${clientMode}, server=${serverMode}`);
             resolve({ success: false, error: `Mode mismatch: client=${clientMode}, server=${serverMode}` });
             return;
           }
 
           clearTimeout(timer);
-          ws.removeEventListener('message', messageHandler);
           console.log('[Handshake] Handshake successful (mode in same message)');
           resolve({ success: true });
         } else {
+          // 需要等待单独的模式消息
           console.log('[Handshake] Waiting for mode byte...');
-
-          const modeHandler = async (modeEvent: MessageEvent) => {
-            try {
-              const modeData = modeEvent.data as ArrayBuffer;
-              console.log(`[Handshake] Mode message size: ${modeData.byteLength} bytes`);
-
-              const modePlain = await aead.unmaskAndDecrypt(new Uint8Array(modeData));
-              console.log(`[Handshake] Decrypted mode length: ${modePlain.length}`);
-
-              if (modePlain.length < 1) {
-                clearTimeout(timer);
-                ws.removeEventListener('message', messageHandler);
-                console.error('[Handshake] Invalid mode length');
-                resolve({ success: false, error: 'Invalid mode length' });
-                return;
-              }
-
-              const clientMode = modePlain[0];
-              const serverMode = 0x02;
-
-              console.log(`[Handshake] Client mode: ${clientMode}, Server mode: ${serverMode}`);
-
-              if (clientMode !== serverMode) {
-                clearTimeout(timer);
-                ws.removeEventListener('message', messageHandler);
-                console.error(`[Handshake] Mode mismatch: client=${clientMode}, server=${serverMode}`);
-                resolve({ success: false, error: `Mode mismatch: client=${clientMode}, server=${serverMode}` });
-                return;
-              }
-
-              clearTimeout(timer);
-              ws.removeEventListener('message', messageHandler);
-              console.log('[Handshake] Handshake successful');
-              resolve({ success: true });
-            } catch (err) {
-              clearTimeout(timer);
-              ws.removeEventListener('message', messageHandler);
-              console.error('[Handshake] Mode decrypt failed:', err);
-              resolve({ success: false, error: `Mode decrypt failed: ${err}` });
-            }
-          };
-
-          ws.addEventListener('message', modeHandler, { once: true });
+          
+          // 检查缓冲区中是否已有模式消息
+          const bufferedMode = messageBuffer.find((_, i) => i > 0);
+          if (bufferedMode) {
+            console.log('[Handshake] Found buffered mode message');
+            await processMode(bufferedMode);
+            return;
+          }
         }
       } catch (err) {
         clearTimeout(timer);
-        ws.removeEventListener('message', messageHandler);
         console.error('[Handshake] Handshake decrypt failed:', err);
         resolve({ success: false, error: `Handshake decrypt failed: ${err}` });
+      }
+    };
+
+    const processMode = async (data: ArrayBuffer) => {
+      if (modeReceived) return;
+      modeReceived = true;
+
+      try {
+        const modePlain = await aead.unmaskAndDecrypt(new Uint8Array(data));
+        console.log(`[Handshake] Decrypted mode length: ${modePlain.length}`);
+
+        if (modePlain.length < 1) {
+          clearTimeout(timer);
+          console.error('[Handshake] Invalid mode length');
+          resolve({ success: false, error: 'Invalid mode length' });
+          return;
+        }
+
+        const clientMode = modePlain[0];
+        const serverMode = 0x02;
+
+        console.log(`[Handshake] Client mode: ${clientMode}, Server mode: ${serverMode}`);
+
+        if (clientMode !== serverMode) {
+          clearTimeout(timer);
+          console.error(`[Handshake] Mode mismatch: client=${clientMode}, server=${serverMode}`);
+          resolve({ success: false, error: `Mode mismatch: client=${clientMode}, server=${serverMode}` });
+          return;
+        }
+
+        clearTimeout(timer);
+        console.log('[Handshake] Handshake successful');
+        resolve({ success: true });
+      } catch (err) {
+        clearTimeout(timer);
+        console.error('[Handshake] Mode decrypt failed:', err);
+        resolve({ success: false, error: `Mode decrypt failed: ${err}` });
+      }
+    };
+
+    // 首先处理缓冲区中的消息
+    if (messageBuffer.length > 0) {
+      console.log('[Handshake] Processing buffered handshake message');
+      processHandshake(messageBuffer[0]);
+    }
+
+    // 设置新消息监听器
+    const messageHandler = async (event: MessageEvent) => {
+      const data = event.data as ArrayBuffer;
+      
+      if (!handshakeReceived) {
+        await processHandshake(data);
+      } else if (!modeReceived) {
+        await processMode(data);
       }
     };
 

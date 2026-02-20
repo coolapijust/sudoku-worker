@@ -124,12 +124,26 @@ async function handleSudokuConnection(
   env: Env,
   wasm: any
 ): Promise<void> {
+  // 在 accept 之前先设置消息缓冲区，防止丢失客户端的第一条消息
+  const messageBuffer: ArrayBuffer[] = [];
+  let messageHandler: ((event: MessageEvent) => void) | null = null;
+  
+  const tempHandler = (event: MessageEvent) => {
+    console.log('[Sudoku] Buffered message during init');
+    messageBuffer.push(event.data as ArrayBuffer);
+    if (messageHandler) {
+      messageHandler(event);
+    }
+  };
+  ws.addEventListener('message', tempHandler);
+  
   ws.accept();
   console.log('[Sudoku] WebSocket accepted');
 
   const keyHex = env.SUDOKU_KEY;
   if (!keyHex || keyHex.length !== 64) {
     console.error(`[Sudoku] Invalid key: length=${keyHex?.length}`);
+    ws.removeEventListener('message', tempHandler);
     ws.close(1011, 'Invalid key');
     return;
   }
@@ -139,6 +153,7 @@ async function handleSudokuConnection(
 
   const keyPtr = wasm.arenaMalloc(keyBytes.length);
   if (!keyPtr) {
+    ws.removeEventListener('message', tempHandler);
     ws.close(1011, 'Memory error');
     return;
   }
@@ -152,6 +167,7 @@ async function handleSudokuConnection(
 
     const sessionId = wasm.initSession(keyPtr, keyBytes.length, cipherType, layoutType);
     if (sessionId < 0) {
+      ws.removeEventListener('message', tempHandler);
       ws.close(1011, `Init failed: ${sessionId}`);
       return;
     }
@@ -159,10 +175,13 @@ async function handleSudokuConnection(
     const aead = new SudokuAEAD(wasm, sessionId, keyBytes);
 
     console.log('[Sudoku] Starting handshake...');
-    const handshake = await handleSudokuHandshake(ws, aead, 10000);
+    console.log(`[Sudoku] Buffered messages: ${messageBuffer.length}`);
+    
+    const handshake = await handleSudokuHandshake(ws, aead, 10000, messageBuffer);
 
     if (!handshake.success) {
       console.error(`[Sudoku] Handshake failed: ${handshake.error}`);
+      ws.removeEventListener('message', tempHandler);
       wasm.closeSession(sessionId);
       wasm.arenaFree(keyPtr);
       ws.close(1011, handshake.error || 'Handshake failed');
