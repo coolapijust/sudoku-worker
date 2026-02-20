@@ -78,21 +78,16 @@ export async function handleSession(
       }
     }
 
-    // 生成响应 URL - 强制使用 https
-    const url = new URL(request.url);
-    const baseUrl = `https://${url.host}`;
-
-    const response = {
-      session_id: httpSessionId,
-      push_url: `${baseUrl}/api/v1/upload?session=${httpSessionId}`,
-      pull_url: `${baseUrl}/stream?session=${httpSessionId}`,
-      fin_url: `${baseUrl}/fin?session=${httpSessionId}`,
-      close_url: `${baseUrl}/close?session=${httpSessionId}`,
-    };
-
-    return new Response(JSON.stringify(response), {
+    // 返回 token=xxx 格式（与原始协议兼容）
+    const token = httpSessionId;
+    const body = `token=${token}`;
+    
+    return new Response(body, {
       status: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'text/plain',
+        'Content-Length': body.length.toString()
+      },
     });
   } catch (err) {
     return new Response(`Error: ${err}`, { status: 500 });
@@ -110,10 +105,10 @@ export async function handleStream(
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  // 获取会话 ID
+  // 获取 token（支持 token 和 session 参数）
   const url = new URL(request.url);
-  const sessionId = url.searchParams.get('session');
-  if (!sessionId) {
+  const token = url.searchParams.get('token') || url.searchParams.get('session');
+  if (!token) {
     return new Response('Missing session', { status: 400 });
   }
 
@@ -125,7 +120,7 @@ export async function handleStream(
     return new Response('Unauthorized', { status: 401 });
   }
 
-  const session = getSession(sessionId);
+  const session = getSession(token);
   if (!session || session.closed) {
     return new Response('Session not found', { status: 404 });
   }
@@ -175,10 +170,10 @@ export async function handleUpload(
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  // 获取会话 ID
+  // 获取 token（支持 token 和 session 参数）
   const url = new URL(request.url);
-  const sessionId = url.searchParams.get('session');
-  if (!sessionId) {
+  const token = url.searchParams.get('token') || url.searchParams.get('session');
+  if (!token) {
     return new Response('Missing session', { status: 400 });
   }
 
@@ -190,29 +185,24 @@ export async function handleUpload(
     return new Response('Unauthorized', { status: 401 });
   }
 
-  const session = getSession(sessionId);
+  const session = getSession(token);
   if (!session || session.closed) {
     return new Response('Session not found', { status: 404 });
   }
 
   try {
-    // 读取请求体（Base64 编码的行）
-    const body = await request.text();
-    const lines = body.split('\n').filter(line => line.trim());
+    // 读取请求体数据
+    const data = new Uint8Array(await request.arrayBuffer());
+    
+    // 解密数据
+    const decrypted = session.aead.decrypt(data);
+    if (!decrypted) {
+      return new Response('Decryption failed', { status: 400 });
+    }
 
-    for (const line of lines) {
-      // Base64 解码
-      const binary = atob(line.trim());
-      const data = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        data[i] = binary.charCodeAt(i);
-      }
-
-      // 解密并发送到上游
-      const plaintext = await session.aead.unmaskAndDecrypt(data);
-      if (session.upstreamSocket) {
-        await session.upstreamSocket.write(plaintext);
-      }
+    // 发送到上游
+    if (session.upstreamSocket) {
+      await session.upstreamSocket.write(decrypted);
     }
 
     return new Response('OK', { status: 200 });
@@ -232,30 +222,21 @@ export async function handleFin(
     return new Response('Method Not Allowed', { status: 405 });
   }
 
+  // 获取 token（支持 token 和 session 参数）
   const url = new URL(request.url);
-  const sessionId = url.searchParams.get('session');
-  if (!sessionId) {
+  const token = url.searchParams.get('token') || url.searchParams.get('session');
+  if (!token) {
     return new Response('Missing session', { status: 400 });
   }
 
-  const auth = new TunnelAuth(env.SUDOKU_KEY);
-  const { header, query } = extractAuth(request);
-  const isValid = await auth.verify(header, query, 'poll', 'POST', '/fin');
-  if (!isValid) {
-    return new Response('Unauthorized', { status: 401 });
-  }
-
-  const session = getSession(sessionId);
-  if (!session) {
+  const session = getSession(token);
+  if (!session || session.closed) {
     return new Response('Session not found', { status: 404 });
   }
 
   // 关闭上游写入端
   if (session.upstreamSocket) {
-    try {
-      // 注意：Cloudflare Socket 没有直接关闭写入的方法
-      // 这里只是标记状态
-    } catch (e) {}
+    session.upstreamSocket.close();
   }
 
   return new Response('OK', { status: 200 });
@@ -273,44 +254,50 @@ export async function handleClose(
     return new Response('Method Not Allowed', { status: 405 });
   }
 
+  // 获取 token（支持 token 和 session 参数）
   const url = new URL(request.url);
-  const sessionId = url.searchParams.get('session');
-  if (!sessionId) {
+  const token = url.searchParams.get('token') || url.searchParams.get('session');
+  if (!token) {
     return new Response('Missing session', { status: 400 });
   }
 
-  const auth = new TunnelAuth(env.SUDOKU_KEY);
-  const { header, query } = extractAuth(request);
-  const isValid = await auth.verify(header, query, 'poll', 'POST', '/close');
-  if (!isValid) {
-    return new Response('Unauthorized', { status: 401 });
+  const session = getSession(token);
+  if (!session || session.closed) {
+    return new Response('Session not found', { status: 404 });
   }
 
-  const session = getSession(sessionId);
-  if (session) {
-    deleteSession(sessionId);
+  // 关闭会话
+  session.closed = true;
+  if (session.upstreamSocket) {
+    session.upstreamSocket.close();
   }
+  deleteSession(token);
 
   return new Response('OK', { status: 200 });
 }
 
 /**
- * 处理上游数据读取
+ * 处理上游读取
  */
-async function handleUpstreamRead(session: import('./poll-session').Session): Promise<void> {
+async function handleUpstreamRead(session: any): Promise<void> {
   if (!session.upstreamSocket) return;
 
   try {
     const reader = session.upstreamSocket.readable.getReader();
+    
     while (!session.closed) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      // 加密数据并放入 pullBuffer
-      const encrypted = await session.aead.encryptAndMask(value);
-      session.pullBuffer.push(encrypted);
+      // 加密数据
+      const encrypted = session.aead.encrypt(value);
+      if (encrypted) {
+        session.pullBuffer.push(encrypted);
+      }
     }
   } catch (err) {
-    // 上游连接错误
+    console.error('[Upstream] Read error:', err);
+  } finally {
+    session.closed = true;
   }
 }
