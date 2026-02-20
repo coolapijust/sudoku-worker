@@ -146,6 +146,8 @@ async function handleSudokuConnection(
     const cipherType = getCipherType(env.CIPHER_METHOD || 'chacha20-poly1305');
     const layoutType = getLayoutType(env.LAYOUT_MODE || 'ascii');
     
+    // initSession 签名: (keyPtr, keyLen, cipherType, layoutType)
+    // 返回值: sessionId (>=0 成功, <0 失败)
     console.log(`[Sudoku] Calling initSession: keyLen=${keyBytes.length}, cipher=${cipherType}, layout=${layoutType}`);
     const sessionId = wasm.initSession(keyPtr, keyBytes.length, cipherType, layoutType);
     console.log(`[Sudoku] initSession returned: ${sessionId}`);
