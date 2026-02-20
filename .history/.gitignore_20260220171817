@@ -1,6 +1,0 @@
-node_modules/
-dist/
-*.wasm
-*.js.map
-.wrangler/
-.dev.vars
