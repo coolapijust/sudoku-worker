@@ -849,7 +849,7 @@ async function handleWebSocket(ws: WebSocket, env: Env, subprotocol: string = 's
   const [keyPtr, needFree] = wasm.writeToMemory(keyData);
   try {
     var sessionId = wasm.exports.initSession(keyPtr, keyData.length, cipherType, LayoutType.ASCII);
-  } finally { if (needFree) wasm.exports.arenaFree(keyPtr); }
+  } finally { if (needFree) wasm.exports.free(keyPtr); }
   
   const aead = new AeadManager(cipherMethod, keyData, wasm, sessionId);
   await aead.init();

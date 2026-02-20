@@ -568,9 +568,9 @@ class WasmInstance {
     try {
       this.exports.initCodecTablesWithKey(keyPtr, key.length);
       this.initialized = true;
-    } finally { if (needFree) this.exports.arenaFree(keyPtr); }
+    } finally { if (needFree) this.exports.free(keyPtr); }
   }
-
+  
   initSession(cipherType: number): number {
     const dummyKey = new Uint8Array(32);
     const [keyPtr, needFree] = this.writeToMemory(dummyKey);
@@ -578,11 +578,11 @@ class WasmInstance {
       const sessionId = this.exports.initSession(keyPtr, dummyKey.length, cipherType, LayoutType.ASCII);
       if (sessionId < 0) throw new Error(`Failed to init session: ${sessionId}`);
       return sessionId;
-    } finally { if (needFree) this.exports.arenaFree(keyPtr); }
+    } finally { if (needFree) this.exports.free(keyPtr); }
   }
-
+  
   closeSession(sessionId: number): void { this.exports.closeSession(sessionId); }
-
+  
   mask(sessionId: number, data: Uint8Array): Uint8Array {
     const [inPtr, needFree] = this.writeToMemory(data);
     try {
@@ -590,9 +590,9 @@ class WasmInstance {
       const outLen = this.exports.getOutLen();
       if (outPtr === 0 || outLen === 0) return new Uint8Array(0);
       return this.readFromMemory(outPtr, outLen);
-    } finally { if (needFree) this.exports.arenaFree(inPtr); }
+    } finally { if (needFree) this.exports.free(inPtr); }
   }
-
+  
   unmask(sessionId: number, data: Uint8Array): Uint8Array {
     const [inPtr, needFree] = this.writeToMemory(data);
     try {
@@ -600,29 +600,29 @@ class WasmInstance {
       const outLen = this.exports.getOutLen();
       if (outPtr === 0 || outLen === 0) return new Uint8Array(0);
       return this.readFromMemory(outPtr, outLen);
-    } finally { if (needFree) this.exports.arenaFree(inPtr); }
+    } finally { if (needFree) this.exports.free(inPtr); }
   }
-
+  
   aeadEncrypt(sessionId: number, plaintext: Uint8Array): Uint8Array {
     const [inPtr] = this.writeToMemory(plaintext);
-    const outPtr = this.exports.arenaMalloc(plaintext.length + 16);
-    if (outPtr === 0) { this.exports.arenaFree(inPtr); throw new Error('Failed to allocate output buffer'); }
+    const outPtr = this.exports.malloc(plaintext.length + 16);
+    if (outPtr === 0) { this.exports.free(inPtr); throw new Error('Failed to allocate output buffer'); }
     try {
       const resultLen = this.exports.aeadEncrypt(sessionId, inPtr, plaintext.length, outPtr);
       if (resultLen === 0) throw new Error('AEAD encryption failed');
       return this.readFromMemory(outPtr, resultLen);
-    } finally { this.exports.arenaFree(inPtr); this.exports.arenaFree(outPtr); }
+    } finally { this.exports.free(inPtr); this.exports.free(outPtr); }
   }
-
+  
   aeadDecrypt(sessionId: number, ciphertext: Uint8Array): Uint8Array {
     const [inPtr] = this.writeToMemory(ciphertext);
-    const outPtr = this.exports.arenaMalloc(ciphertext.length);
-    if (outPtr === 0) { this.exports.arenaFree(inPtr); throw new Error('Failed to allocate output buffer'); }
+    const outPtr = this.exports.malloc(ciphertext.length);
+    if (outPtr === 0) { this.exports.free(inPtr); throw new Error('Failed to allocate output buffer'); }
     try {
       const resultLen = this.exports.aeadDecrypt(sessionId, inPtr, ciphertext.length, outPtr);
       if (resultLen === 0) throw new Error('AEAD decryption failed');
       return this.readFromMemory(outPtr, resultLen);
-    } finally { this.exports.arenaFree(inPtr); this.exports.arenaFree(outPtr); }
+    } finally { this.exports.free(inPtr); this.exports.free(outPtr); }
   }
 }
 
@@ -849,7 +849,7 @@ async function handleWebSocket(ws: WebSocket, env: Env, subprotocol: string = 's
   const [keyPtr, needFree] = wasm.writeToMemory(keyData);
   try {
     var sessionId = wasm.exports.initSession(keyPtr, keyData.length, cipherType, LayoutType.ASCII);
-  } finally { if (needFree) wasm.exports.arenaFree(keyPtr); }
+  } finally { if (needFree) wasm.exports.free(keyPtr); }
   
   const aead = new AeadManager(cipherMethod, keyData, wasm, sessionId);
   await aead.init();
