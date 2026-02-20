@@ -117,8 +117,8 @@ func arenaMalloc(size uint32) uint32 {
 	return ptr
 }
 
-//export arenaFree
-func arenaFree(ptr uint32) {
+//export free
+func free(ptr uint32) {
 	_ = ptr
 }
 
