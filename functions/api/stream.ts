@@ -117,8 +117,11 @@ async function handleSudokuConnection(
   console.log('[Sudoku] WebSocket accepted');
   
   const keyHex = env.SUDOKU_KEY;
+  console.log(`[Sudoku] Key length: ${keyHex?.length || 0}`);
+  console.log(`[Sudoku] Key first 8 chars: ${keyHex?.substring(0, 8) || 'undefined'}...`);
+  
   if (!keyHex || keyHex.length !== 64) {
-    console.error('[Sudoku] Invalid key');
+    console.error(`[Sudoku] Invalid key: length=${keyHex?.length}, expected=64`);
     ws.close(1011, 'Invalid key');
     return;
   }
@@ -143,11 +146,13 @@ async function handleSudokuConnection(
     const cipherType = getCipherType(env.CIPHER_METHOD || 'chacha20-poly1305');
     const layoutType = getLayoutType(env.LAYOUT_MODE || 'ascii');
     
+    console.log(`[Sudoku] Calling initSession: keyLen=${keyBytes.length}, cipher=${cipherType}, layout=${layoutType}`);
     const sessionId = wasm.initSession(keyPtr, keyBytes.length, cipherType, layoutType);
+    console.log(`[Sudoku] initSession returned: ${sessionId}`);
     
     if (sessionId < 0) {
-      console.error(`[Sudoku] Init failed: ${sessionId}`);
-      ws.close(1011, 'Init failed');
+      console.error(`[Sudoku] Init failed with error code: ${sessionId}`);
+      ws.close(1011, `Init failed: ${sessionId}`);
       return;
     }
     
