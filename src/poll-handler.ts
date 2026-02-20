@@ -68,11 +68,11 @@ export async function handleSession(
     // 连接到上游（如果配置了）
     if (env.UPSTREAM_HOST) {
       try {
-        session.upstreamSocket = connect({ 
-          hostname: env.UPSTREAM_HOST, 
-          port: DEFAULT_UPSTREAM_PORT 
+        session.upstreamSocket = connect({
+          hostname: env.UPSTREAM_HOST,
+          port: DEFAULT_UPSTREAM_PORT
         });
-        
+
         // 启动上游读取循环
         handleUpstreamRead(session);
       } catch (err) {
@@ -86,12 +86,13 @@ export async function handleSession(
     // 返回 token=xxx 格式（与原始协议兼容）
     const token = httpSessionId;
     const body = `token=${token}`;
-    
+
     return new Response(body, {
       status: 200,
-      headers: { 
+      headers: {
         'Content-Type': 'text/plain',
-        'Content-Length': body.length.toString()
+        'Content-Length': body.length.toString(),
+        'Cache-Control': 'no-store, no-transform'
       },
     });
   } catch (err) {
@@ -141,7 +142,7 @@ export async function handleStream(
             const base64 = btoa(String.fromCharCode(...data));
             controller.enqueue(new TextEncoder().encode(base64 + '\n'));
           }
-          
+
           // 如果没有数据，等待一段时间后关闭
           setTimeout(() => {
             controller.close();
@@ -159,7 +160,7 @@ export async function handleStream(
     status: 200,
     headers: {
       'Content-Type': 'text/plain',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': 'no-store, no-transform',
     },
   });
 }
@@ -198,7 +199,7 @@ export async function handleUpload(
   try {
     // 读取请求体数据
     const data = new Uint8Array(await request.arrayBuffer());
-    
+
     // 解密数据
     const decrypted = session.aead.decrypt(data);
     if (!decrypted) {
@@ -289,7 +290,7 @@ async function handleUpstreamRead(session: any): Promise<void> {
 
   try {
     const reader = session.upstreamSocket.readable.getReader();
-    
+
     while (!session.closed) {
       const { done, value } = await reader.read();
       if (done) break;
