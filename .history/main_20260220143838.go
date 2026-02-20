@@ -674,14 +674,13 @@ func unmask(id int32, inPtr uint32, inLen uint32) uint32 {
 	session := (*SudokuInstance)(unsafe.Pointer(&arena[sessionAddr]))
 	state := &session.sudokuState
 
-	out := uint32(outBufBase)
+	out := outBufBase
 	outPos := uint32(0)
 
 	var hintBuf [4]uint8
 	hintCount := uint8(0)
 
 	padMarker := state[25]
-	_ = padMarker
 
 	// 处理每个输入字节
 	for i := uint32(0); i < inLen && outPos < outBufSize-4; i++ {

@@ -576,16 +576,17 @@ func mask(id int32, inPtr uint32, inLen uint32) uint32 {
 	// 恢复RNG状态
 	rngState := binary.BigEndian.Uint32(state[16:20])
 
-	out := uint32(outBufBase)
+	out := outBufBase
 	outPos := uint32(0)
 
 	// 最大输出大小
-	maxOut := inLen*6 + 32
+	maxOut := inLen * 6 + 32
 	if maxOut > outBufSize {
 		maxOut = outBufSize
 	}
 
 	padPoolSize := state[13]
+	padMarker := state[25]
 	paddingThreshold := binary.BigEndian.Uint16(state[14:16])
 	paddingThreshold32 := uint32(paddingThreshold) << 16
 
@@ -674,14 +675,13 @@ func unmask(id int32, inPtr uint32, inLen uint32) uint32 {
 	session := (*SudokuInstance)(unsafe.Pointer(&arena[sessionAddr]))
 	state := &session.sudokuState
 
-	out := uint32(outBufBase)
+	out := outBufBase
 	outPos := uint32(0)
 
 	var hintBuf [4]uint8
 	hintCount := uint8(0)
 
 	padMarker := state[25]
-	_ = padMarker
 
 	// 处理每个输入字节
 	for i := uint32(0); i < inLen && outPos < outBufSize-4; i++ {
