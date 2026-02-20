@@ -12,6 +12,7 @@
  */
 
 import { connect } from 'cloudflare:sockets';
+import { parseTargetAddress } from './src/address';
 
 // 研究站 HTML (反引号已替换为单引号)
 import { SUDOKU_SITE_HTML } from './src/site';
@@ -352,22 +353,50 @@ async function handleWebSocket(ws: WebSocket, env: Env, subprotocol: string = 's
   const aead = new AeadManager(cipherMethod, keyData, wasm, sessionId);
   await aead.init();
 
-  let upstreamSocket: Socket;
-  try {
-    upstreamSocket = await connectUpstream(env);
-  } catch (err) {
-    console.error('Failed to connect upstream:', err);
-    ws.close(1011, 'Upstream connection failed');
-    wasm.closeSession(sessionId);
-    return;
+  const standaloneMode = !env.UPSTREAM_HOST || (env as any).STANDALONE_PROXY === 'true';
+
+  let upstreamSocket: any = null;
+  let upstreamWriter: any = null;
+  let upstreamReader: any = null;
+  let targetParsed = false;
+  let bufferOffset = new Uint8Array(0);
+
+  const startUpstreamReadLoop = () => {
+    (async () => {
+      if (!upstreamReader) return;
+      try {
+        while (true) {
+          const { done, value } = await upstreamReader.read();
+          if (done) { ws.close(1000, 'Upstream closed'); break; }
+          const ciphertext = await aead.encrypt(value);
+          const masked = wasm.mask(sessionId, ciphertext);
+          ws.send(masked);
+        }
+      } catch (err) {
+        console.error('Error reading from upstream:', err);
+        ws.close(1011, 'Upstream read error');
+      } finally { cleanup(); }
+    })();
+  };
+
+  if (!standaloneMode && env.UPSTREAM_HOST) {
+    try {
+      upstreamSocket = await connectUpstream(env);
+      upstreamWriter = upstreamSocket.writable.getWriter();
+      upstreamReader = upstreamSocket.readable.getReader();
+    } catch (err) {
+      console.error('Failed to connect upstream:', err);
+      ws.close(1011, 'Upstream connection failed');
+      wasm.closeSession(sessionId);
+      return;
+    }
   }
 
   ws.accept();
-  const upstreamWriter = upstreamSocket.writable.getWriter();
-  const upstreamReader = upstreamSocket.readable.getReader();
 
   const cleanup = () => {
-    try { upstreamWriter.releaseLock(); upstreamSocket.close(); } catch { }
+    try { if (upstreamWriter) upstreamWriter.releaseLock(); } catch { }
+    try { if (upstreamSocket) upstreamSocket.close(); } catch { }
     try { wasm.closeSession(sessionId); } catch { }
   };
 
@@ -376,7 +405,42 @@ async function handleWebSocket(ws: WebSocket, env: Env, subprotocol: string = 's
       let data: Uint8Array = typeof event.data === 'string' ? new TextEncoder().encode(event.data) : new Uint8Array(event.data);
       const unmasked = wasm.unmask(sessionId, data);
       const plaintext = await aead.decrypt(unmasked);
-      await upstreamWriter.write(plaintext);
+
+      if (standaloneMode && !targetParsed) {
+        const merged = new Uint8Array(bufferOffset.length + plaintext.length);
+        merged.set(bufferOffset);
+        merged.set(plaintext, bufferOffset.length);
+
+        const target = parseTargetAddress(merged);
+        if (!target) {
+          bufferOffset = merged;
+          return;
+        }
+
+        targetParsed = true;
+        bufferOffset = new Uint8Array(0);
+
+        try {
+          console.log(`[Standalone-WS] Proxy connecting to -> ${target.hostname}:${target.port}`);
+          upstreamSocket = connect({ hostname: target.hostname, port: target.port });
+          upstreamWriter = upstreamSocket.writable.getWriter();
+          upstreamReader = upstreamSocket.readable.getReader();
+
+          startUpstreamReadLoop();
+
+          const remainingData = merged.subarray(target.byteLength);
+          if (remainingData.length > 0) {
+            await upstreamWriter.write(remainingData);
+          }
+        } catch (e) {
+          console.error(`[Standalone-WS] Failed to connect to proxy target: ${e}`);
+          cleanup();
+        }
+      } else {
+        if (upstreamWriter) {
+          await upstreamWriter.write(plaintext);
+        }
+      }
     } catch (err) {
       console.error('Error processing WebSocket message:', err);
       ws.close(1011, 'Processing error');
@@ -387,20 +451,9 @@ async function handleWebSocket(ws: WebSocket, env: Env, subprotocol: string = 's
   ws.addEventListener('close', cleanup);
   ws.addEventListener('error', cleanup);
 
-  (async () => {
-    try {
-      while (true) {
-        const { done, value } = await upstreamReader.read();
-        if (done) { ws.close(1000, 'Upstream closed'); break; }
-        const ciphertext = await aead.encrypt(value);
-        const masked = wasm.mask(sessionId, ciphertext);
-        ws.send(masked);
-      }
-    } catch (err) {
-      console.error('Error reading from upstream:', err);
-      ws.close(1011, 'Upstream read error');
-    } finally { cleanup(); }
-  })();
+  if (!standaloneMode && upstreamReader) {
+    startUpstreamReadLoop();
+  }
 }
 
 export default {

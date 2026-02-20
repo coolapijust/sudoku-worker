@@ -7,6 +7,7 @@ import { TunnelAuth, TunnelMode, extractAuth } from './auth';
 import { createSession, getSession, deleteSession, generateSessionId } from './poll-session';
 import { SudokuAEAD, hexToBytes, getCipherType, getLayoutType } from './sudoku-aead';
 import { connect } from 'cloudflare:sockets';
+import { parseTargetAddress } from './address';
 
 // 默认配置
 const DEFAULT_UPSTREAM_PORT = 443;
@@ -64,14 +65,16 @@ export async function handleSession(
     // 创建会话
     const httpSessionId = generateSessionId();
     const session = createSession(httpSessionId, aead);
+    session.standaloneMode = !env.UPSTREAM_HOST || (env as any).STANDALONE_PROXY === 'true';
 
-    // 连接到上游（如果配置了）
-    if (env.UPSTREAM_HOST) {
+    // 连接到上游（如果不是独立代理模式且配置了上游）
+    if (!session.standaloneMode && env.UPSTREAM_HOST) {
       try {
         session.upstreamSocket = connect({
           hostname: env.UPSTREAM_HOST,
           port: DEFAULT_UPSTREAM_PORT
         });
+        session.upstreamWriter = session.upstreamSocket.writable.getWriter();
 
         // 启动上游读取循环
         handleUpstreamRead(session);
@@ -206,9 +209,43 @@ export async function handleUpload(
       return new Response('Decryption failed', { status: 400 });
     }
 
-    // 发送到上游
-    if (session.upstreamSocket) {
-      await session.upstreamSocket.write(decrypted);
+    if (session.standaloneMode && !session.targetParsed) {
+      // 拼接待解析的缓冲数据
+      const merged = new Uint8Array(session.bufferOffset.length + decrypted.length);
+      merged.set(session.bufferOffset);
+      merged.set(decrypted, session.bufferOffset.length);
+
+      const target = parseTargetAddress(merged);
+      if (!target) {
+        // 数据不够，继续等待
+        session.bufferOffset = merged;
+        return new Response('OK', { status: 200 });
+      }
+
+      session.targetParsed = true;
+      session.bufferOffset = new Uint8Array(0);
+
+      try {
+        console.log(`[Standalone] Proxy connecting to -> ${target.hostname}:${target.port}`);
+        session.upstreamSocket = connect({ hostname: target.hostname, port: target.port });
+        session.upstreamWriter = session.upstreamSocket.writable.getWriter();
+
+        handleUpstreamRead(session);
+
+        const remainingData = merged.subarray(target.byteLength);
+        if (remainingData.length > 0) {
+          await session.upstreamWriter.write(remainingData);
+        }
+      } catch (e) {
+        console.error(`[Standalone] Failed to connect to proxy target: ${e}`);
+        deleteSession(session.id);
+        return new Response('Target connect failed', { status: 502 });
+      }
+    } else {
+      // 发送到上游 (常规模式)
+      if (session.upstreamWriter) {
+        await session.upstreamWriter.write(decrypted);
+      }
     }
 
     return new Response('OK', { status: 200 });
@@ -241,7 +278,9 @@ export async function handleFin(
   }
 
   // 关闭上游写入端
-  if (session.upstreamSocket) {
+  if (session.upstreamWriter) {
+    session.upstreamWriter.close();
+  } else if (session.upstreamSocket) {
     session.upstreamSocket.close();
   }
 
@@ -274,8 +313,11 @@ export async function handleClose(
 
   // 关闭会话
   session.closed = true;
+  if (session.upstreamWriter) {
+    try { session.upstreamWriter.close(); } catch (e) { }
+  }
   if (session.upstreamSocket) {
-    session.upstreamSocket.close();
+    try { session.upstreamSocket.close(); } catch (e) { }
   }
   deleteSession(token);
 

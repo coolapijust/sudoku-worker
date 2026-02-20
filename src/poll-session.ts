@@ -3,15 +3,21 @@
  */
 
 import { SudokuAEAD } from './sudoku-aead';
+import type { Socket } from 'cloudflare:sockets';
 
 export interface Session {
   id: string;
   aead: SudokuAEAD;
   upstreamSocket: Socket | null;
+  upstreamWriter: any; // WritableStreamDefaultWriter
   pullBuffer: Uint8Array[];
   pushBuffer: Uint8Array[];
   lastActivity: number;
   closed: boolean;
+  // Standalone proxy state
+  standaloneMode: boolean;
+  targetParsed: boolean;
+  bufferOffset: Uint8Array;
 }
 
 // 简单的内存会话存储（生产环境应该用 Redis 或 Durable Objects）
@@ -22,10 +28,14 @@ export function createSession(id: string, aead: SudokuAEAD): Session {
     id,
     aead,
     upstreamSocket: null,
+    upstreamWriter: null,
     pullBuffer: [],
     pushBuffer: [],
     lastActivity: Date.now(),
     closed: false,
+    standaloneMode: false,
+    targetParsed: false,
+    bufferOffset: new Uint8Array(0),
   };
   sessions.set(id, session);
   return session;
@@ -46,7 +56,7 @@ export function deleteSession(id: string): void {
     if (session.upstreamSocket) {
       try {
         session.upstreamSocket.close();
-      } catch (e) {}
+      } catch (e) { }
     }
     sessions.delete(id);
   }
