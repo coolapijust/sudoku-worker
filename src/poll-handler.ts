@@ -77,9 +77,9 @@ export async function handleSession(
       }
     }
 
-    // 生成响应 URL
+    // 生成响应 URL - 强制使用 https
     const url = new URL(request.url);
-    const baseUrl = `${url.protocol}//${url.host}`;
+    const baseUrl = `https://${url.host}`;
 
     const response = {
       session_id: httpSessionId,
