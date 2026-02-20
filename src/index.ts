@@ -74,40 +74,46 @@ export async function getWasmInstance(): Promise<WebAssembly.Instance> {
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const url = new URL(request.url);
-    const pathname = url.pathname;
-
-    console.log(`[DEBUG] ${request.method} ${pathname} from ${request.headers.get('user-agent') || 'unknown'}`);
-
-    // 获取 WASM 实例
-    let wasm: any;
     try {
-      const wasmInstance = await getWasmInstance();
-      wasm = wasmInstance.exports;
-    } catch (err) {
-      console.error(`[WASM Error] ${err}`);
-      return new Response(`WASM Error: ${err}`, { status: 500 });
-    }
+      const url = new URL(request.url);
+      const pathname = url.pathname;
 
-    // Poll 模式端点 - 支持带 /api 前缀的路径
-    switch (pathname) {
-      case '/session':
-      case '/api/session':
-        return handleSession(request, env, wasm);
-      case '/stream':
-      case '/api/stream':
-        return handleStream(request, env);
-      case '/api/v1/upload':
-        return handleUpload(request, env);
-      case '/fin':
-      case '/api/fin':
-        return handleFin(request, env);
-      case '/close':
-      case '/api/close':
-        return handleClose(request, env, wasm);
-      default:
-        console.log(`[404] Path not found: ${pathname}`);
-        return new Response(`Not Found: ${pathname}`, { status: 404 });
+      console.log(`[DEBUG] ${request.method} ${pathname} from ${request.headers.get('user-agent') || 'unknown'}`);
+
+      // 获取 WASM 实例
+      let wasm: any;
+      try {
+        const wasmInstance = await getWasmInstance();
+        wasm = wasmInstance.exports;
+      } catch (err) {
+        console.error(`[WASM Error] ${err}`);
+        return new Response(`WASM Error: ${err}`, { status: 500 });
+      }
+
+      // Poll 模式端点 - 支持带 /api 前缀的路径
+      switch (pathname) {
+        case '/session':
+        case '/api/session':
+          return await handleSession(request, env, wasm);
+        case '/stream':
+        case '/api/stream':
+          return await handleStream(request, env);
+        case '/api/v1/upload':
+          return await handleUpload(request, env);
+        case '/fin':
+        case '/api/fin':
+          return await handleFin(request, env);
+        case '/close':
+        case '/api/close':
+          return await handleClose(request, env, wasm);
+        default:
+          console.log(`[404] Path not found: ${pathname}`);
+          return new Response(`Not Found: ${pathname}`, { status: 404 });
+      }
+    } catch (err: any) {
+      console.error(`[Unhandled Error] ${err?.message || err}`);
+      console.error(err?.stack || 'No stack trace');
+      return new Response(`Internal Server Error: ${err?.message || err}`, { status: 500 });
     }
   }
 };
