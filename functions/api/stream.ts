@@ -12,7 +12,6 @@ import sudokuWasmModule from '../../sudoku.wasm';
 interface Env {
   SUDOKU_KEY: string;
   UPSTREAM_HOST: string;
-  UPSTREAM_PORT: string;
   CIPHER_METHOD: string;
   LAYOUT_MODE: string;
   KEY_DERIVE_SALT: string;
@@ -128,7 +127,7 @@ async function handleSudokuConnection(
   
   const keyBytes = hexToBytes(keyHex);
   const upstreamHost = env.UPSTREAM_HOST || '127.0.0.1';
-  const upstreamPort = parseInt(env.UPSTREAM_PORT || '8080', 10);
+  const upstreamPort = 443; // Cloudflare Workers/Pages 出站只能使用 443
   
   console.log(`[Sudoku] Connecting to ${upstreamHost}:${upstreamPort}`);
   
