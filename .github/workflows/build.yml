@@ -55,15 +55,19 @@ jobs:
           retention-days: 30
 
       - name: Commit and Push WASM
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
+          # 配置 git 使用 GITHUB_TOKEN 进行认证
+          git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
           git add sudoku.wasm
           if git diff --cached --quiet; then
             echo "[BUILD] No changes to sudoku.wasm"
           else
             echo "[BUILD] Committing updated sudoku.wasm..."
             git commit -m "chore: update sudoku.wasm from GitHub Actions"
-            git push
+            git push origin HEAD:${{ github.ref }}
             echo "[BUILD] WASM pushed to repository"
           fi
