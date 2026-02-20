@@ -2,10 +2,12 @@
  * Sudoku Protocol - Cloudflare Pages Function
  * WebSocket 代理端点: /api/stream
  * 
- * WASM 模块通过 fetch 动态加载
+ * WASM 模块通过 ESM import 直接加载（Pages Functions 推荐方式）
  */
 
 import { connect } from 'cloudflare:sockets';
+// ESM 方式导入 WASM 模块
+import sudokuWasmModule from '../../sudoku.wasm';
 
 interface Env {
   SUDOKU_KEY: string;
@@ -21,24 +23,43 @@ let wasmInstanceCache: WebAssembly.Instance | null = null;
 let wasmMemoryCache: WebAssembly.Memory | null = null;
 
 async function getWasmInstance(): Promise<WebAssembly.Instance> {
-  if (wasmInstanceCache) {
+  if (wasmInstanceCache && wasmMemoryCache) {
     return wasmInstanceCache;
   }
-
+  
   console.log('[WASM] Starting instantiation...');
+  console.log(`[WASM] sudokuWasmModule type: ${typeof sudokuWasmModule}`);
+  console.log(`[WASM] sudokuWasmModule constructor: ${sudokuWasmModule?.constructor?.name}`);
+  console.log(`[WASM] sudokuWasmModule keys: ${Object.keys(sudokuWasmModule || {})}`);
   
   try {
-    // 动态加载 WASM 文件
-    console.log('[WASM] Fetching WASM module...');
-    const wasmResponse = await fetch('https://raw.githubusercontent.com/coolapijust/sudoku-worker/main/sudoku.wasm');
-    if (!wasmResponse.ok) {
-      throw new Error(`Failed to fetch WASM: ${wasmResponse.status}`);
-    }
-    console.log(`[WASM] Fetch response: ${wasmResponse.status}`);
+    // 检查是否是 WebAssembly.Module
+    let moduleToInstantiate: WebAssembly.Module | Response;
     
-    // 使用 instantiateStreaming 直接编译并实例化
-    console.log('[WASM] Using instantiateStreaming...');
-    const { instance } = await WebAssembly.instantiateStreaming(wasmResponse, {
+    if (sudokuWasmModule instanceof WebAssembly.Module) {
+      console.log('[WASM] Module is WebAssembly.Module');
+      moduleToInstantiate = sudokuWasmModule;
+    } else if (sudokuWasmModule instanceof Response) {
+      console.log('[WASM] Module is Response');
+      moduleToInstantiate = sudokuWasmModule;
+    } else if (typeof sudokuWasmModule === 'object' && sudokuWasmModule !== null) {
+      // 可能是 { default: ... } 或其他包装
+      console.log('[WASM] Module is object, checking properties...');
+      const keys = Object.keys(sudokuWasmModule);
+      console.log(`[WASM] Keys: ${keys.join(', ')}`);
+      if ('default' in sudokuWasmModule) {
+        console.log(`[WASM] default type: ${typeof (sudokuWasmModule as any).default}`);
+        moduleToInstantiate = (sudokuWasmModule as any).default;
+      } else {
+        moduleToInstantiate = sudokuWasmModule as any;
+      }
+    } else {
+      console.log('[WASM] Using module as-is');
+      moduleToInstantiate = sudokuWasmModule as any;
+    }
+    
+    // 实例化 WASM 模块 - 添加 WASI 支持
+    const instantiated = await WebAssembly.instantiate(moduleToInstantiate, {
       wasi_snapshot_preview1: {
         // WASI 标准函数存根
         fd_close: () => 0,
@@ -80,7 +101,8 @@ async function getWasmInstance(): Promise<WebAssembly.Instance> {
       }
     });
     
-    // instance 已直接从 instantiateStreaming 解构获得
+    // 获取 instance（WebAssembly.instantiate 返回 {module, instance}）
+    const instance = instantiated.instance;
     
     console.log('[WASM] Instantiation successful');
     
