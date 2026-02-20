@@ -27,10 +27,35 @@ async function getWasmInstance(): Promise<WebAssembly.Instance> {
     return wasmInstanceCache;
   }
   
-  // 实例化 WASM 模块
+  // 实例化 WASM 模块 - 添加 WASI 支持
   const instance = await WebAssembly.instantiate(sudokuWasmModule, {
+    wasi_snapshot_preview1: {
+      // WASI 标准函数存根
+      fd_close: () => 0,
+      fd_write: () => 0,
+      fd_seek: () => 0,
+      fd_fdstat_get: () => 0,
+      fd_prestat_get: () => 0,
+      fd_prestat_dir_name: () => 0,
+      environ_sizes_get: () => 0,
+      environ_get: () => 0,
+      args_sizes_get: () => 0,
+      args_get: () => 0,
+      proc_exit: (code: number) => { throw new Error(`Exit ${code}`); },
+      clock_time_get: () => 0,
+      random_get: (buf: number, len: number) => {
+        // 提供随机数
+        const memory = (instance.exports as any).memory as WebAssembly.Memory;
+        const arr = new Uint8Array(memory.buffer, buf, len);
+        crypto.getRandomValues(arr);
+        return 0;
+      },
+    },
     env: { 
-      abort: () => { throw new Error('Wasm abort'); }
+      abort: (msg: number, file: number, line: number, col: number) => {
+        console.error(`[WASM Abort] at ${file}:${line}:${col}`);
+        throw new Error('Wasm abort'); 
+      }
     }
   });
   
