@@ -1,0 +1,324 @@
+# Cloudflare Pages 部署指南
+
+由于 Cloudflare Worker Dashboard 不支持直接上传 WASM 模块，使用 **Cloudflare Pages** 是更好的选择。Pages Functions 支持 WASM 模块绑定。
+
+---
+
+## 方式一：通过 Git 集成部署（推荐）
+
+### 步骤 1：准备仓库
+
+确保 GitHub 仓库包含以下文件：
+
+```
+sudoku-worker/
+├── functions/
+│   └── api/
+│       └── stream.ts       # WebSocket 端点
+├── static/
+│   └── index.html          # 研究站页面
+├── sudoku.wasm             # WASM 模块
+├── wrangler.toml           # Pages 配置
+└── package.json
+```
+
+### 步骤 2：创建 Pages 配置文件
+
+创建 `wrangler.toml`（Pages 版本）：
+
+```toml
+name = "sudoku-wasm-pages"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# WASM 模块绑定
+[[wasm_modules]]
+binding = "SUDOKU_WASM"
+module = "./sudoku.wasm"
+
+[vars]
+UPSTREAM_HOST = "127.0.0.1"
+UPSTREAM_PORT = "8080"
+CIPHER_METHOD = "chacha20-poly1305"
+LAYOUT_MODE = "ascii"
+KEY_DERIVE_SALT = "sudoku-v2-edge-salt"
+ED25519_PUBLIC_KEY = ""
+```
+
+### 步骤 3：创建 Functions 入口
+
+创建 `functions/api/stream.ts`：
+
+```typescript
+import { connect } from 'cloudflare:sockets';
+
+interface Env {
+  SUDOKU_WASM: WebAssembly.Module;
+  SUDOKU_KEY: string;
+  UPSTREAM_HOST: string;
+  UPSTREAM_PORT: string;
+  CIPHER_METHOD: string;
+  ED25519_PRIVATE_KEY?: string;
+}
+
+export const onRequest: PagesFunction<Env> = async (context) => {
+  const { request, env } = context;
+  
+  // 检查 WebSocket 升级
+  const upgradeHeader = request.headers.get('Upgrade');
+  if (upgradeHeader !== 'websocket') {
+    return new Response('Expected WebSocket', { status: 400 });
+  }
+  
+  // 实例化 WASM
+  const wasmInstance = new WebAssembly.Instance(env.SUDOKU_WASM, {
+    env: { abort: () => { throw new Error('Wasm abort'); } }
+  });
+  const exports = wasmInstance.exports as any;
+  
+  // 创建 WebSocket pair
+  const [client, server] = Object.values(new WebSocketPair()) as [WebSocket, WebSocket];
+  
+  // 处理连接...
+  await handleSudokuStream(server, env, exports);
+  
+  return new Response(null, {
+    status: 101,
+    webSocket: client,
+  });
+};
+
+async function handleSudokuStream(
+  ws: WebSocket, 
+  env: Env, 
+  wasmExports: any
+): Promise<void> {
+  // 实现 Sudoku 协议处理逻辑
+  // 参考 index.ts 中的实现
+}
+```
+
+### 步骤 4：创建静态页面
+
+创建 `static/index.html`：
+
+```html
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sudoku Protocol</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+    code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <h1>Sudoku Protocol Worker</h1>
+  <p>WebSocket 端点: <code>/api/stream</code></p>
+  <p>状态: <span id="status">检查中...</span></p>
+  
+  <script>
+    // 检查 WebSocket 连接
+    const ws = new WebSocket('wss://' + location.host + '/api/stream');
+    ws.onopen = () => {
+      document.getElementById('status').textContent = '在线';
+      document.getElementById('status').style.color = 'green';
+      ws.close();
+    };
+    ws.onerror = () => {
+      document.getElementById('status').textContent = '离线';
+      document.getElementById('status').style.color = 'red';
+    };
+  </script>
+</body>
+</html>
+```
+
+### 步骤 5：配置 package.json
+
+```json
+{
+  "name": "sudoku-wasm-pages",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "wrangler pages dev",
+    "deploy": "wrangler pages deploy"
+  },
+  "dependencies": {
+    "@cloudflare/workers-types": "^4.20231218.0"
+  },
+  "devDependencies": {
+    "wrangler": "^3.22.0"
+  }
+}
+```
+
+### 步骤 6：连接 GitHub 部署
+
+1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com)
+2. 进入 **Pages** → **Create a project**
+3. 选择 **Connect to Git**
+4. 选择 `coolapijust/sudoku-worker` 仓库
+5. 配置构建设置：
+   - **Framework preset**: None
+   - **Build command**: 留空（或 `echo "No build"`）
+   - **Build output directory**: `static`
+6. 点击 **Save and Deploy**
+
+### 步骤 7：设置 Secrets
+
+部署完成后：
+
+1. 进入 Pages 项目 → **Settings** → **Functions**
+2. 添加 **Environment Variables**（Secrets）：
+   - 点击 **Add variable**
+   - 选择 **Encrypt**
+   - 添加 `SUDOKU_KEY` 和 `ED25519_PRIVATE_KEY`
+
+---
+
+## 方式二：直接上传部署
+
+### 步骤 1：准备文件
+
+创建项目目录结构：
+
+```
+sudoku-pages/
+├── functions/
+│   └── api/
+│       └── stream.ts
+├── static/
+│   └── index.html
+├── sudoku.wasm
+└── wrangler.toml
+```
+
+### 步骤 2：使用 Wrangler 部署
+
+```bash
+# 登录 Cloudflare
+wrangler login
+
+# 部署到 Pages
+wrangler pages deploy . --project-name=sudoku-wasm-pages
+```
+
+### 步骤 3：设置 Secrets
+
+```bash
+# 设置 Secrets
+wrangler pages secret put SUDOKU_KEY --project-name=sudoku-wasm-pages
+# 输入: cc6aff06410039f12142d6c2d633a99161513e1009a3e6a34f4bb3424d1b5c64
+
+wrangler pages secret put ED25519_PRIVATE_KEY --project-name=sudoku-wasm-pages
+# 输入: f517c12b7cb4fbea4e4d7167e1caae5ba0040be4e613e6a6d5884e598e3003d5
+```
+
+---
+
+## 方式三：使用 GitHub Actions 自动部署
+
+### 创建 `.github/workflows/pages.yml`
+
+```yaml
+name: Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy . --project-name=sudoku-wasm-pages
+```
+
+### 配置 GitHub Secrets
+
+在 GitHub 仓库 → **Settings** → **Secrets and variables** → **Actions** 中添加：
+
+- `CLOUDFLARE_API_TOKEN`: Cloudflare API Token
+- `CLOUDFLARE_ACCOUNT_ID`: Cloudflare Account ID
+
+### 获取 API Token
+
+1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com)
+2. 进入 **My Profile** → **API Tokens**
+3. 点击 **Create Token**
+4. 使用 **Custom token** 模板：
+   - **Token name**: Pages Deploy
+   - **Permissions**: 
+     - `Cloudflare Pages:Edit`
+     - `Account:Read`
+   - **Account Resources**: Include your account
+5. 点击 **Continue** → **Create Token**
+
+---
+
+## 访问部署后的服务
+
+部署完成后，您将获得一个类似以下的 URL：
+
+```
+https://sudoku-wasm-pages.pages.dev
+```
+
+### 端点说明
+
+| 路径 | 功能 |
+|------|------|
+| `/` | 静态页面（研究站） |
+| `/api/stream` | WebSocket Sudoku 协议代理 |
+
+---
+
+## 与 Worker 部署的区别
+
+| 特性 | Cloudflare Worker | Cloudflare Pages |
+|------|-------------------|------------------|
+| WASM 支持 | 通过 Wrangler CLI | 通过 Wrangler CLI 或 Git 集成 |
+| 静态页面 | 需要额外配置 | 原生支持 |
+| 自定义域名 | 支持 | 支持 |
+| 部署方式 | Wrangler CLI | Git 集成、Wrangler CLI、直接上传 |
+| 适合场景 | 纯 API/代理 | 全栈应用（前端 + API） |
+
+---
+
+## 故障排查
+
+### 问题 1: WASM 模块未找到
+
+**错误**: `WebAssembly.Module is not a constructor`
+
+**解决**: 确保 `wrangler.toml` 中正确配置了 `[[wasm_modules]]`。
+
+### 问题 2: Secrets 未生效
+
+**错误**: `Secret not found`
+
+**解决**: Pages 的 Secrets 在 Functions 标签页中设置，不是 Environment Variables。
+
+### 问题 3: WebSocket 连接失败
+
+**错误**: `Error in WebSocket connection`
+
+**解决**: 确保 Functions 路由正确配置，返回 `status: 101` 和 `webSocket` 对象。
