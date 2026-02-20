@@ -393,7 +393,7 @@ func decodeTableInsert(key uint32, val uint8) {
 // decodeTableLookup - 查找解码表
 func decodeTableLookup(key uint32) (uint8, bool) {
 	hash := key & (decodeTableSize - 1)
-	for i := 0; i < decodeTableSize; i++ {
+	for {
 		if decodeTableKeys[hash] == key {
 			return decodeTableVals[hash], true
 		}
@@ -402,7 +402,6 @@ func decodeTableLookup(key uint32) (uint8, bool) {
 		}
 		hash = (hash + 1) & (decodeTableSize - 1)
 	}
-	return 0, false
 }
 
 // initCodecTables - 初始化编解码表 (默认 key)
