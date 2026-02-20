@@ -23,15 +23,30 @@ let wasmInstanceCache: WebAssembly.Instance | null = null;
 let wasmMemoryCache: WebAssembly.Memory | null = null;
 
 async function getWasmInstance(): Promise<WebAssembly.Instance> {
-  if (wasmInstanceCache && wasmMemoryCache) {
+  if (wasmInstanceCache) {
     return wasmInstanceCache;
   }
-  
+
   console.log('[WASM] Starting instantiation...');
+  console.log(`[WASM] Module type: ${typeof sudokuWasmModule}`);
+  console.log(`[WASM] Module constructor: ${sudokuWasmModule?.constructor?.name}`);
   
   try {
+    // 检查模块类型并正确处理
+    let module: WebAssembly.Module;
+    if (sudokuWasmModule instanceof WebAssembly.Module) {
+      module = sudokuWasmModule;
+      console.log('[WASM] Module is WebAssembly.Module');
+    } else if (sudokuWasmModule instanceof ArrayBuffer || sudokuWasmModule instanceof Uint8Array) {
+      console.log('[WASM] Module is ArrayBuffer/Uint8Array, compiling...');
+      module = await WebAssembly.compile(sudokuWasmModule);
+    } else {
+      console.log('[WASM] Trying to use module directly:', sudokuWasmModule);
+      module = sudokuWasmModule as any;
+    }
+    
     // 实例化 WASM 模块 - 添加 WASI 支持
-    const instantiated = await WebAssembly.instantiate(sudokuWasmModule, {
+    const instantiated = await WebAssembly.instantiate(module, {
       wasi_snapshot_preview1: {
         // WASI 标准函数存根
         fd_close: () => 0,
