@@ -34,17 +34,11 @@ async function getWasmInstance(): Promise<WebAssembly.Instance> {
     if (!wasmResponse.ok) {
       throw new Error(`Failed to fetch WASM: ${wasmResponse.status}`);
     }
-    const wasmBuffer = await wasmResponse.arrayBuffer();
-    console.log(`[WASM] Fetched ${wasmBuffer.byteLength} bytes`);
+    console.log(`[WASM] Fetch response: ${wasmResponse.status}`);
     
-    // 编译 WASM 模块
-    console.log('[WASM] Compiling module...');
-    const module = await WebAssembly.compile(wasmBuffer);
-    console.log('[WASM] Module compiled successfully');
-    
-    // 实例化 WASM 模块 - 添加 WASI 支持
-    console.log('[WASM] Instantiating...');
-    const instantiated = await WebAssembly.instantiate(module, {
+    // 使用 instantiateStreaming 直接编译并实例化
+    console.log('[WASM] Using instantiateStreaming...');
+    const { instance } = await WebAssembly.instantiateStreaming(wasmResponse, {
       wasi_snapshot_preview1: {
         // WASI 标准函数存根
         fd_close: () => 0,
@@ -86,8 +80,7 @@ async function getWasmInstance(): Promise<WebAssembly.Instance> {
       }
     });
     
-    // 获取 instance（WebAssembly.instantiate 返回 {module, instance}）
-    const instance = instantiated.instance;
+    // instance 已直接从 instantiateStreaming 解构获得
     
     console.log('[WASM] Instantiation successful');
     
