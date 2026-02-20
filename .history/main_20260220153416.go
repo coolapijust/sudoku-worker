@@ -64,10 +64,11 @@ type SudokuInstance struct {
 	sudokuState  [64]byte
 }
 
-// 加密类型常量在 crypto.go 中定义:
-// CipherNone = 0
-// CipherAES128GCM = 1
-// CipherChaCha20Poly = 2
+const (
+	CipherNone         = 0
+	CipherAES128GCM    = 1
+	CipherChaCha20Poly = 2
+)
 
 const (
 	LayoutASCII   = 0
