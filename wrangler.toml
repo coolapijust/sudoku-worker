@@ -9,7 +9,7 @@ name = "SUDOKU_WASM"
 path = "./sudoku.wasm"
 
 [vars]
-CIPHER_METHOD = "aes-128-gcm"
+CIPHER_METHOD = "chacha20-poly1305"  # 与客户端默认匹配
 LAYOUT_MODE = "ascii"
 
 # 环境变量需要在 Cloudflare Dashboard 中设置：
