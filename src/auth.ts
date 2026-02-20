@@ -21,12 +21,13 @@ export class TunnelAuth {
   }
 
   private async initKey(): Promise<Uint8Array> {
+    // 注意：原始协议直接使用密钥字符串，不是十六进制解码后的字节！
     const prefix = new TextEncoder().encode('sudoku-httpmask-auth-v1:');
-    const keyBytes = hexToBytes(this.keyHex);
+    const keyString = new TextEncoder().encode(this.keyHex);  // 使用原始字符串的字节
     
-    const combined = new Uint8Array(prefix.length + keyBytes.length);
+    const combined = new Uint8Array(prefix.length + keyString.length);
     combined.set(prefix);
-    combined.set(keyBytes, prefix.length);
+    combined.set(keyString, prefix.length);
     
     const hash = await crypto.subtle.digest('SHA-256', combined);
     return new Uint8Array(hash);
