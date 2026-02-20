@@ -101,9 +101,19 @@ async function getWasmInstance(): Promise<WebAssembly.Instance> {
       }
     });
     
-    // 获取 instance（WebAssembly.instantiate 返回 {module, instance}）
-    const instance = instantiated.instance;
+    // 处理不同的返回值格式
+    // 标准: {module, instance}, Cloudflare Pages: 直接返回 instance
+    let instance: WebAssembly.Instance;
+    if ('instance' in instantiated) {
+      console.log('[WASM] Got {module, instance} format');
+      instance = (instantiated as any).instance;
+    } else {
+      console.log('[WASM] Got direct instance format');
+      instance = instantiated as WebAssembly.Instance;
+    }
     
+    console.log(`[WASM] Instance type: ${typeof instance}`);
+    console.log(`[WASM] Instance constructor: ${instance?.constructor?.name}`);
     console.log('[WASM] Instantiation successful');
     
     // 获取 memory 并缓存
