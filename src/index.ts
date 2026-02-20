@@ -77,12 +77,15 @@ export default {
     const url = new URL(request.url);
     const pathname = url.pathname;
 
+    console.log(`[DEBUG] ${request.method} ${pathname} from ${request.headers.get('user-agent') || 'unknown'}`);
+
     // 获取 WASM 实例
     let wasm: any;
     try {
       const wasmInstance = await getWasmInstance();
       wasm = wasmInstance.exports;
     } catch (err) {
+      console.error(`[WASM Error] ${err}`);
       return new Response(`WASM Error: ${err}`, { status: 500 });
     }
 
@@ -99,7 +102,8 @@ export default {
       case '/close':
         return handleClose(request, env, wasm);
       default:
-        return new Response('Not Found', { status: 404 });
+        console.log(`[404] Path not found: ${pathname}`);
+        return new Response(`Not Found: ${pathname}`, { status: 404 });
     }
   }
 };
