@@ -4,21 +4,9 @@
  */
 
 import { handleSession, handleStream, handleUpload, handleFin, handleClose } from './poll-handler';
-
-// WASM 模块通过 wrangler.toml 的 wasm_modules 配置绑定
-// 在 Workers 环境中通过 env.SUDOKU_WASM 访问
-declare global {
-  interface Env {
-    SUDOKU_WASM: WebAssembly.Module;
-    SUDOKU_KEY: string;
-    UPSTREAM_HOST: string;
-    CIPHER_METHOD: string;
-    LAYOUT_MODE: string;
-  }
-}
+import sudokuWasmModule from '../sudoku.wasm';
 
 export interface Env {
-  SUDOKU_WASM: WebAssembly.Module;
   SUDOKU_KEY: string;
   UPSTREAM_HOST: string;
   CIPHER_METHOD: string;
@@ -28,18 +16,13 @@ export interface Env {
 let wasmInstanceCache: WebAssembly.Instance | null = null;
 let wasmMemoryCache: WebAssembly.Memory | null = null;
 
-export async function getWasmInstance(env: Env): Promise<WebAssembly.Instance> {
+export async function getWasmInstance(): Promise<WebAssembly.Instance> {
   if (wasmInstanceCache && wasmMemoryCache) {
     return wasmInstanceCache;
   }
 
   try {
-    const wasmModule = env.SUDOKU_WASM;
-    if (!wasmModule) {
-      throw new Error('SUDOKU_WASM not found in environment');
-    }
-
-    const instantiated = await WebAssembly.instantiate(wasmModule, {
+    const instantiated = await WebAssembly.instantiate(sudokuWasmModule, {
       wasi_snapshot_preview1: {
         fd_close: () => 0,
         fd_write: () => 0,
@@ -97,7 +80,7 @@ export default {
     // 获取 WASM 实例
     let wasm: any;
     try {
-      const wasmInstance = await getWasmInstance(env);
+      const wasmInstance = await getWasmInstance();
       wasm = wasmInstance.exports;
     } catch (err) {
       return new Response(`WASM Error: ${err}`, { status: 500 });

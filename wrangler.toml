@@ -3,9 +3,6 @@ main = "src/index.ts"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# WASM 模块绑定 - 使用对象格式
-wasm_modules = { SUDOKU_WASM = "./sudoku.wasm" }
-
 [vars]
 CIPHER_METHOD = "chacha20-poly1305"
 LAYOUT_MODE = "ascii"
