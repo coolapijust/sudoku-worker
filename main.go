@@ -47,6 +47,22 @@ var arena [arenaSize]byte
 var arenaPtr uint32 = heapBase
 var sessionUsed [maxSessions]uint8
 var currentOutLen uint32
+var wasmInitialized bool = false
+
+//export initWasm
+func initWasm() int32 {
+	if wasmInitialized {
+		return 0
+	}
+	// 清零 sessionUsed 数组
+	for i := int32(0); i < maxSessions; i++ {
+		sessionUsed[i] = 0
+	}
+	arenaPtr = heapBase
+	currentOutLen = 0
+	wasmInitialized = true
+	return 0
+}
 
 // ============================================================================
 // 2. 核心数据结构

@@ -92,6 +92,15 @@ async function getWasmInstance(): Promise<WebAssembly.Instance> {
     }
     console.log('[WASM] All required exports found');
     
+    // 初始化 WASM 全局状态
+    if (exports.initWasm) {
+      console.log('[WASM] Calling initWasm...');
+      const initResult = exports.initWasm();
+      console.log(`[WASM] initWasm returned: ${initResult}`);
+    } else {
+      console.warn('[WASM] initWasm not found, skipping initialization');
+    }
+    
     wasmInstanceCache = instance;
     return instance;
   } catch (err) {
