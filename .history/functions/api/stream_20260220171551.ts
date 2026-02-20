@@ -1,15 +1,12 @@
 /**
  * Sudoku Protocol - Cloudflare Pages Function
  * WebSocket 代理端点: /api/stream
- * 
- * WASM 模块通过 ESM import 直接加载（Pages Functions 推荐方式）
  */
 
 import { connect } from 'cloudflare:sockets';
-// ESM 方式导入 WASM 模块
-import sudokuWasmModule from '../../sudoku.wasm';
 
 interface Env {
+  SUDOKU_WASM: WebAssembly.Module | ArrayBuffer;
   SUDOKU_KEY: string;
   UPSTREAM_HOST: string;
   UPSTREAM_PORT: string;
@@ -17,25 +14,6 @@ interface Env {
   LAYOUT_MODE: string;
   KEY_DERIVE_SALT: string;
   ED25519_PRIVATE_KEY?: string;
-}
-
-// 全局 WASM 实例缓存（避免每次请求都重新实例化）
-let wasmInstanceCache: WebAssembly.Instance | null = null;
-
-async function getWasmInstance(): Promise<WebAssembly.Instance> {
-  if (wasmInstanceCache) {
-    return wasmInstanceCache;
-  }
-  
-  // 实例化 WASM 模块
-  const instance = await WebAssembly.instantiate(sudokuWasmModule, {
-    env: { 
-      abort: () => { throw new Error('Wasm abort'); }
-    }
-  });
-  
-  wasmInstanceCache = instance;
-  return instance;
 }
 
 export const onRequest: PagesFunction<Env> = async (context) => {
@@ -53,8 +31,31 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   console.log(`[Sudoku] WebSocket request from ${request.headers.get('CF-Connecting-IP') || 'unknown'}`);
   
   try {
-    // 获取 WASM 实例
-    const wasmInstance = await getWasmInstance();
+    // 检查 WASM 模块
+    if (!env.SUDOKU_WASM) {
+      console.error('[Sudoku] SUDOKU_WASM not bound');
+      return new Response('WASM module not configured', { status: 500 });
+    }
+    
+    console.log('[Sudoku] WASM module type:', typeof env.SUDOKU_WASM, env.SUDOKU_WASM.constructor?.name);
+    
+    // 实例化 WASM - Pages 可能传入 Module 或 ArrayBuffer
+    let wasmModule: WebAssembly.Module;
+    if (env.SUDOKU_WASM instanceof WebAssembly.Module) {
+      wasmModule = env.SUDOKU_WASM;
+    } else if (env.SUDOKU_WASM instanceof ArrayBuffer) {
+      wasmModule = await WebAssembly.compile(env.SUDOKU_WASM);
+    } else {
+      // 尝试作为 Module 使用
+      wasmModule = env.SUDOKU_WASM as WebAssembly.Module;
+    }
+    
+    const wasmInstance = new WebAssembly.Instance(wasmModule, {
+      env: { 
+        abort: () => { throw new Error('Wasm abort'); }
+      }
+    });
+    
     const wasmExports = wasmInstance.exports as any;
     
     // 检查必要的导出函数
@@ -62,8 +63,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       console.error('[Sudoku] WASM missing required exports');
       return new Response('WASM module invalid', { status: 500 });
     }
-    
-    console.log('[Sudoku] WASM loaded successfully');
     
     // 创建 WebSocket pair
     const pair = new WebSocketPair();
