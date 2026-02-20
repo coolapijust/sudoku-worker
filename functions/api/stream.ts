@@ -31,7 +31,7 @@ async function getWasmInstance(): Promise<WebAssembly.Instance> {
   
   try {
     // 实例化 WASM 模块 - 添加 WASI 支持
-    const instance = await WebAssembly.instantiate(sudokuWasmModule, {
+    const instantiated = await WebAssembly.instantiate(sudokuWasmModule, {
       wasi_snapshot_preview1: {
         // WASI 标准函数存根
         fd_close: () => 0,
@@ -72,6 +72,9 @@ async function getWasmInstance(): Promise<WebAssembly.Instance> {
         }
       }
     });
+    
+    // 获取 instance（WebAssembly.instantiate 返回 {module, instance}）
+    const instance = instantiated.instance;
     
     console.log('[WASM] Instantiation successful');
     
