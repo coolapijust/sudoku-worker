@@ -147,48 +147,8 @@ func arenaFree(ptr uint32) {
 // 参数: keyPtr, keyLen, cipherType, layoutType
 // 返回值: sessionId (>=0 成功, <0 失败)
 func initSession(keyPtr uint32, keyLen uint32, cipherType uint8, layoutType uint8) int32 {
-	// 简化：直接使用 session 0
-	const id int32 = 0
-	
-	if keyLen > 32 {
-		return -2 // 密钥过长
-	}
-
-	// 根据 cipherType 设置 nonceSize 和 tagSize
-	var nonceSize uint8 = 12 // 默认 96 bits for GCM
-	var tagSize uint8 = 16   // 默认 128 bits for GCM
-	
-	sessionUsed[id] = 1
-	sessionAddr := sessionBase + uint32(id)*sessionSize
-	session := (*SudokuInstance)(unsafe.Pointer(&arena[sessionAddr]))
-
-	session.nonceCounter = 0
-	for i := uint32(0); i < keyLen && i < 32; i++ {
-		session.key[i] = arena[keyPtr+i]
-	}
-	session.cipherType = cipherType
-	session.nonceSize = nonceSize
-	session.tagSize = tagSize
-	session.flags = 0
-
-	state := &session.sudokuState
-	copy(state[0:8], []byte{0x53, 0x55, 0x44, 0x4F, 0x4B, 0x55, 0x56, 0x32})
-	state[8] = cipherType
-	state[9] = nonceSize
-	state[10] = tagSize
-	state[11] = layoutType
-	state[12] = uint8(paddingPoolSize)
-	state[13] = uint8(paddingPoolSize)
-	binary.BigEndian.PutUint16(state[14:16], uint16(19661))
-	binary.BigEndian.PutUint32(state[16:20], 0)
-	state[20] = 0
-	state[21] = 0
-	state[22] = 0
-	state[23] = 0
-	state[24] = 0
-	state[25] = 0x3F
-
-	return id
+	// 调试：直接返回 0，不做任何操作
+	return 0
 }
 
 //export closeSession

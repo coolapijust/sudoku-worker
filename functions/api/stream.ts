@@ -191,7 +191,13 @@ async function handleSudokuConnection(
     
     // initSession 签名: (keyPtr, keyLen, cipherType, layoutType)
     // 返回值: sessionId (>=0 成功, <0 失败)
-    console.log(`[Sudoku] Calling initSession: keyLen=${keyBytes.length}, cipher=${cipherType}, layout=${layoutType}`);
+    console.log(`[Sudoku] wasm.initSession type: ${typeof wasm.initSession}`);
+    console.log(`[Sudoku] Calling initSession: keyPtr=${keyPtr}, keyLen=${keyBytes.length}, cipher=${cipherType}, layout=${layoutType}`);
+    
+    // 直接调用测试
+    const testResult = wasm.initSession(0, 32, 0, 0);
+    console.log(`[Sudoku] Test initSession(0,32,0,0) returned: ${testResult}`);
+    
     const sessionId = wasm.initSession(keyPtr, keyBytes.length, cipherType, layoutType);
     console.log(`[Sudoku] initSession returned: ${sessionId}`);
     
