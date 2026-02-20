@@ -1,0 +1,30 @@
+name: Build TinyGo WASM
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup TinyGo
+        uses: acifani/setup-tinygo@v2
+        with:
+          tinygo-version: '0.33.0'
+
+      - name: Build WASM
+        run: |
+          echo "[BUILD] $(date -u +%Y-%m-%dT%H:%M:%SZ) Starting TinyGo WASM build"
+          tinygo build -o sudoku.wasm -target wasm ./main.go
+          echo "[BUILD] $(date -u +%Y-%m-%dT%H:%M:%SZ) Build completed, file size: $(ls -lh sudoku.wasm | awk '{print $5}')"
+
+      - name: Upload WASM Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sudoku-wasm
+          path: sudoku.wasm
+          retention-days: 30
