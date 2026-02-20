@@ -89,17 +89,21 @@ export default {
       return new Response(`WASM Error: ${err}`, { status: 500 });
     }
 
-    // Poll 模式端点
+    // Poll 模式端点 - 支持带 /api 前缀的路径
     switch (pathname) {
       case '/session':
+      case '/api/session':
         return handleSession(request, env, wasm);
       case '/stream':
+      case '/api/stream':
         return handleStream(request, env);
       case '/api/v1/upload':
         return handleUpload(request, env);
       case '/fin':
+      case '/api/fin':
         return handleFin(request, env);
       case '/close':
+      case '/api/close':
         return handleClose(request, env, wasm);
       default:
         console.log(`[404] Path not found: ${pathname}`);
