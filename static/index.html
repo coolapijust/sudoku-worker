@@ -1,0 +1,1059 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sudoku Matrix Encoding & ASCII Research Lab</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        dark: {
+                            900: '#0a0a0a',
+                            800: '#111111',
+                            700: '#1a1a1a',
+                            600: '#222222',
+                            500: '#2a2a2a',
+                        },
+                        accent: {
+                            cyan: '#00d4ff',
+                            purple: '#a855f7',
+                            green: '#22c55e',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            background: #0a0a0a;
+            color: #e5e5e5;
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #00d4ff 0%, #a855f7 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .glow-cyan {
+            box-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+        }
+        .glow-purple {
+            box-shadow: 0 0 20px rgba(168, 85, 247, 0.3);
+        }
+        .terminal-glow {
+            box-shadow: 0 0 30px rgba(0, 212, 255, 0.15), inset 0 0 30px rgba(0, 212, 255, 0.05);
+        }
+        .sudoku-cell {
+            transition: all 0.2s ease;
+        }
+        .sudoku-cell:hover {
+            background: rgba(0, 212, 255, 0.1);
+        }
+        .sudoku-cell.selected {
+            background: rgba(0, 212, 255, 0.2);
+            box-shadow: inset 0 0 10px rgba(0, 212, 255, 0.3);
+        }
+        .sudoku-cell.fixed {
+            color: #00d4ff;
+            font-weight: 600;
+        }
+        .sudoku-cell.user-input {
+            color: #a855f7;
+        }
+        .sudoku-cell.solved {
+            animation: solvePulse 0.5s ease;
+        }
+        @keyframes solvePulse {
+            0% { transform: scale(1); background: rgba(34, 197, 94, 0); }
+            50% { transform: scale(1.1); background: rgba(34, 197, 94, 0.3); }
+            100% { transform: scale(1); background: rgba(34, 197, 94, 0); }
+        }
+        .scan-line {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #00d4ff, transparent);
+            animation: scan 3s linear infinite;
+            opacity: 0.5;
+        }
+        @keyframes scan {
+            0% { transform: translateY(0); }
+            100% { transform: translateY(400px); }
+        }
+        .log-entry {
+            animation: logFadeIn 0.3s ease;
+        }
+        @keyframes logFadeIn {
+            from { opacity: 0; transform: translateX(-10px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        .terminal-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        .terminal-scroll::-webkit-scrollbar-track {
+            background: #0a0a0a;
+        }
+        .terminal-scroll::-webkit-scrollbar-thumb {
+            background: #2a2a2a;
+            border-radius: 3px;
+        }
+        .terminal-scroll::-webkit-scrollbar-thumb:hover {
+            background: #3a3a3a;
+        }
+        .grid-line {
+            stroke: #333;
+            stroke-width: 1;
+        }
+        .grid-line-bold {
+            stroke: #555;
+            stroke-width: 2;
+        }
+        .ascii-char {
+            animation: asciiFlicker 0.1s ease;
+        }
+        @keyframes asciiFlicker {
+            0% { opacity: 0; }
+            50% { opacity: 1; color: #00d4ff; }
+            100% { opacity: 0.7; }
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #00d4ff 0%, #0891b2 100%);
+            transition: all 0.3s ease;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 212, 255, 0.3);
+        }
+        .btn-secondary {
+            border: 1px solid #333;
+            transition: all 0.3s ease;
+        }
+        .btn-secondary:hover {
+            border-color: #00d4ff;
+            color: #00d4ff;
+        }
+        .code-block {
+            background: #0a0a0a;
+            border: 1px solid #222;
+        }
+        .method-get { color: #22c55e; }
+        .method-post { color: #a855f7; }
+        .method-ws { color: #00d4ff; }
+    </style>
+</head>
+<body class="min-h-screen bg-dark-900 font-sans">
+    <!-- Navigation -->
+    <nav class="fixed top-0 left-0 right-0 z-50 bg-dark-900/80 backdrop-blur-md border-b border-dark-600">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent-cyan to-accent-purple flex items-center justify-center">
+                        <i data-lucide="grid-3x3" class="w-5 h-5 text-white"></i>
+                    </div>
+                    <span class="font-mono font-semibold text-lg tracking-tight">
+                        SME<span class="text-accent-cyan">.</span>Lab
+                    </span>
+                </div>
+                <div class="hidden md:flex items-center gap-8">
+                    <a href="#research" class="text-sm text-gray-400 hover:text-white transition-colors">Research</a>
+                    <a href="#demo" class="text-sm text-gray-400 hover:text-white transition-colors">Demo</a>
+                    <a href="#terminal" class="text-sm text-gray-400 hover:text-white transition-colors">Terminal</a>
+                    <a href="#api" class="text-sm text-gray-400 hover:text-white transition-colors">API</a>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-accent-green animate-pulse"></span>
+                    <span class="text-xs text-gray-500 font-mono">SYSTEM ONLINE</span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="pt-32 pb-20 px-4 sm:px-6 lg:px-8">
+        <div class="max-w-5xl mx-auto text-center">
+            <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-dark-700 border border-dark-500 mb-8">
+                <span class="w-2 h-2 rounded-full bg-accent-purple animate-pulse"></span>
+                <span class="text-xs font-mono text-gray-400">v2.4.1 • Distributed Computing Protocol</span>
+            </div>
+            <h1 class="text-4xl sm:text-5xl lg:text-6xl font-bold mb-6 leading-tight">
+                Sudoku Matrix Encoding<br>
+                <span class="gradient-text">& ASCII Research Lab</span>
+            </h1>
+            <p class="text-lg sm:text-xl text-gray-400 max-w-3xl mx-auto mb-10 leading-relaxed">
+                Pioneering research in matrix-based data obfuscation through constraint satisfaction problems. 
+                Our distributed Sudoku solving network enables real-time ASCII stream encoding for secure 
+                multi-dimensional data transmission.
+            </p>
+            <div class="flex flex-wrap justify-center gap-4">
+                <a href="#demo" class="btn-primary px-6 py-3 rounded-lg font-medium text-black flex items-center gap-2">
+                    <i data-lucide="play" class="w-4 h-4"></i>
+                    Try Interactive Demo
+                </a>
+                <a href="#api" class="btn-secondary px-6 py-3 rounded-lg font-medium text-gray-300 flex items-center gap-2">
+                    <i data-lucide="code" class="w-4 h-4"></i>
+                    View Documentation
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Research Overview -->
+    <section id="research" class="py-20 px-4 sm:px-6 lg:px-8 border-t border-dark-600">
+        <div class="max-w-6xl mx-auto">
+            <div class="grid lg:grid-cols-2 gap-12 items-center">
+                <div>
+                    <h2 class="text-3xl font-bold mb-6">Matrix Obfuscation Algorithm</h2>
+                    <p class="text-gray-400 mb-6 leading-relaxed">
+                        Our proprietary Sudoku Matrix Encoding (SME) algorithm transforms arbitrary data into 
+                        valid 9x9 Sudoku configurations. Each cell represents an encoded byte, with row, column, 
+                        and box constraints ensuring data integrity during transmission.
+                    </p>
+                    <div class="space-y-4">
+                        <div class="flex items-start gap-4 p-4 rounded-lg bg-dark-700 border border-dark-500">
+                            <div class="w-10 h-10 rounded-lg bg-accent-cyan/10 flex items-center justify-center flex-shrink-0">
+                                <i data-lucide="binary" class="w-5 h-5 text-accent-cyan"></i>
+                            </div>
+                            <div>
+                                <h3 class="font-semibold mb-1">Binary-to-Matrix Mapping</h3>
+                                <p class="text-sm text-gray-500">8-bit sequences mapped to valid Sudoku cell values (1-9)</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-4 p-4 rounded-lg bg-dark-700 border border-dark-500">
+                            <div class="w-10 h-10 rounded-lg bg-accent-purple/10 flex items-center justify-center flex-shrink-0">
+                                <i data-lucide="shuffle" class="w-5 h-5 text-accent-purple"></i>
+                            </div>
+                            <div>
+                                <h3 class="font-semibold mb-1">Constraint-Based Scrambling</h3>
+                                <p class="text-sm text-gray-500">Row/column constraints provide natural error detection</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-4 p-4 rounded-lg bg-dark-700 border border-dark-500">
+                            <div class="w-10 h-10 rounded-lg bg-accent-green/10 flex items-center justify-center flex-shrink-0">
+                                <i data-lucide="zap" class="w-5 h-5 text-accent-green"></i>
+                            </div>
+                            <div>
+                                <h3 class="font-semibold mb-1">Real-time Stream Processing</h3>
+                                <p class="text-sm text-gray-500">WebSocket-based distributed solving network</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="relative">
+                    <div class="absolute inset-0 bg-gradient-to-r from-accent-cyan/20 to-accent-purple/20 rounded-2xl blur-3xl"></div>
+                    <div class="relative bg-dark-700 rounded-2xl p-6 border border-dark-500">
+                        <div class="flex items-center justify-between mb-4">
+                            <span class="text-sm font-mono text-gray-500">Encoding Pipeline</span>
+                            <div class="flex gap-2">
+                                <span class="w-3 h-3 rounded-full bg-red-500"></span>
+                                <span class="w-3 h-3 rounded-full bg-yellow-500"></span>
+                                <span class="w-3 h-3 rounded-full bg-green-500"></span>
+                            </div>
+                        </div>
+                        <div class="space-y-3 font-mono text-sm">
+                            <div class="p-3 rounded bg-dark-800 border-l-2 border-accent-cyan">
+                                <span class="text-gray-500">INPUT:</span>
+                                <span class="text-accent-cyan"> "Hello, World!"</span>
+                            </div>
+                            <div class="flex justify-center">
+                                <i data-lucide="arrow-down" class="w-4 h-4 text-gray-600"></i>
+                            </div>
+                            <div class="p-3 rounded bg-dark-800 border-l-2 border-accent-purple">
+                                <span class="text-gray-500">BINARY:</span>
+                                <span class="text-accent-purple"> 01001000 01100101...</span>
+                            </div>
+                            <div class="flex justify-center">
+                                <i data-lucide="arrow-down" class="w-4 h-4 text-gray-600"></i>
+                            </div>
+                            <div class="p-3 rounded bg-dark-800 border-l-2 border-accent-green">
+                                <span class="text-gray-500">MATRIX:</span>
+                                <span class="text-accent-green"> 9x9 Grid Configuration</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Interactive Sudoku Demo -->
+    <section id="demo" class="py-20 px-4 sm:px-6 lg:px-8 border-t border-dark-600">
+        <div class="max-w-6xl mx-auto">
+            <div class="text-center mb-12">
+                <h2 class="text-3xl font-bold mb-4">Interactive Sudoku Solver</h2>
+                <p class="text-gray-400 max-w-2xl mx-auto">
+                    Experience our constraint satisfaction engine. Click "Solve" to watch the algorithm 
+                    work in real-time, or input your own values to test the encoding.
+                </p>
+            </div>
+            
+            <div class="grid lg:grid-cols-2 gap-8">
+                <!-- Sudoku Grid -->
+                <div class="bg-dark-700 rounded-2xl p-6 border border-dark-500">
+                    <div class="flex items-center justify-between mb-6">
+                        <span class="text-sm font-mono text-gray-500">9x9 Matrix</span>
+                        <div class="flex gap-2">
+                            <button onclick="generatePuzzle()" class="px-3 py-1.5 text-xs rounded bg-dark-600 hover:bg-dark-500 transition-colors font-mono">
+                                Generate
+                            </button>
+                            <button onclick="clearGrid()" class="px-3 py-1.5 text-xs rounded bg-dark-600 hover:bg-dark-500 transition-colors font-mono">
+                                Clear
+                            </button>
+                        </div>
+                    </div>
+                    <div id="sudoku-grid" class="grid grid-cols-9 gap-0.5 bg-dark-600 p-0.5 rounded-lg max-w-md mx-auto">
+                        <!-- Grid cells generated by JS -->
+                    </div>
+                    <div class="flex gap-3 mt-6 justify-center">
+                        <button onclick="solveSudoku()" id="solve-btn" class="btn-primary px-6 py-3 rounded-lg font-medium text-black flex items-center gap-2">
+                            <i data-lucide="cpu" class="w-4 h-4"></i>
+                            Solve Matrix
+                        </button>
+                        <button onclick="validateGrid()" class="btn-secondary px-6 py-3 rounded-lg font-medium text-gray-300 flex items-center gap-2">
+                            <i data-lucide="check-circle" class="w-4 h-4"></i>
+                            Validate
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Computation Log -->
+                <div class="bg-dark-700 rounded-2xl p-6 border border-dark-500">
+                    <div class="flex items-center justify-between mb-6">
+                        <span class="text-sm font-mono text-gray-500">Computation Log</span>
+                        <div class="flex items-center gap-2">
+                            <span class="w-2 h-2 rounded-full bg-accent-green animate-pulse"></span>
+                            <span class="text-xs text-gray-500 font-mono">LIVE</span>
+                        </div>
+                    </div>
+                    <div id="computation-log" class="h-80 overflow-y-auto terminal-scroll font-mono text-xs space-y-1 bg-dark-800 rounded-lg p-4">
+                        <div class="text-gray-500">// System initialized...</div>
+                        <div class="text-gray-500">// Waiting for input...</div>
+                    </div>
+                    <div class="mt-4 flex items-center gap-4 text-xs font-mono">
+                        <div class="flex items-center gap-2">
+                            <span class="text-gray-500">Iterations:</span>
+                            <span id="iteration-count" class="text-accent-cyan">0</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-gray-500">Time:</span>
+                            <span id="solve-time" class="text-accent-purple">0ms</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-gray-500">Nodes:</span>
+                            <span id="node-count" class="text-accent-green">0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Data Terminal -->
+    <section id="terminal" class="py-20 px-4 sm:px-6 lg:px-8 border-t border-dark-600">
+        <div class="max-w-6xl mx-auto">
+            <div class="text-center mb-12">
+                <h2 class="text-3xl font-bold mb-4">ASCII Stream Terminal</h2>
+                <p class="text-gray-400 max-w-2xl mx-auto">
+                    Real-time data stream from our distributed solving network. Each character represents 
+                    a computed matrix cell value being synchronized across nodes.
+                </p>
+            </div>
+            
+            <div class="relative">
+                <div class="absolute inset-0 bg-accent-cyan/5 rounded-2xl blur-xl"></div>
+                <div class="relative bg-black rounded-2xl border border-dark-500 terminal-glow overflow-hidden">
+                    <!-- Terminal Header -->
+                    <div class="flex items-center justify-between px-4 py-3 bg-dark-800 border-b border-dark-600">
+                        <div class="flex items-center gap-3">
+                            <div class="flex gap-1.5">
+                                <span class="w-3 h-3 rounded-full bg-red-500"></span>
+                                <span class="w-3 h-3 rounded-full bg-yellow-500"></span>
+                                <span class="w-3 h-3 rounded-full bg-green-500"></span>
+                            </div>
+                            <span class="text-sm font-mono text-gray-400 ml-3">sme-terminal — ws://stream.sme.lab:8443</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <button onclick="toggleTerminal()" id="terminal-toggle" class="text-xs font-mono px-3 py-1 rounded bg-accent-green/20 text-accent-green">
+                                PAUSE
+                            </button>
+                            <i data-lucide="wifi" class="w-4 h-4 text-accent-green"></i>
+                        </div>
+                    </div>
+                    
+                    <!-- Terminal Content -->
+                    <div class="relative">
+                        <div class="scan-line"></div>
+                        <div id="terminal-output" class="h-96 overflow-y-auto terminal-scroll p-4 font-mono text-sm">
+                            <!-- ASCII stream generated by JS -->
+                        </div>
+                    </div>
+                    
+                    <!-- Terminal Footer -->
+                    <div class="px-4 py-2 bg-dark-800 border-t border-dark-600 flex items-center justify-between text-xs font-mono">
+                        <div class="flex items-center gap-4">
+                            <span class="text-gray-500">STREAM ID: <span class="text-accent-cyan">0x7F3A9B2E</span></span>
+                            <span class="text-gray-500">BUFFER: <span class="text-accent-purple" id="buffer-size">0 KB</span></span>
+                        </div>
+                        <div class="flex items-center gap-4">
+                            <span class="text-gray-500">THROUGHPUT: <span class="text-accent-green" id="throughput">0</span> chars/s</span>
+                            <span class="text-gray-500">LATENCY: <span class="text-accent-cyan">12ms</span></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Terminal Stats -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
+                <div class="bg-dark-700 rounded-lg p-4 border border-dark-500 text-center">
+                    <div class="text-2xl font-bold text-accent-cyan" id="total-chars">0</div>
+                    <div class="text-xs text-gray-500 mt-1">Total Characters</div>
+                </div>
+                <div class="bg-dark-700 rounded-lg p-4 border border-dark-500 text-center">
+                    <div class="text-2xl font-bold text-accent-purple" id="active-nodes">47</div>
+                    <div class="text-xs text-gray-500 mt-1">Active Nodes</div>
+                </div>
+                <div class="bg-dark-700 rounded-lg p-4 border border-dark-500 text-center">
+                    <div class="text-2xl font-bold text-accent-green" id="matrices-solved">1,247</div>
+                    <div class="text-xs text-gray-500 mt-1">Matrices Solved</div>
+                </div>
+                <div class="bg-dark-700 rounded-lg p-4 border border-dark-500 text-center">
+                    <div class="text-2xl font-bold text-white">99.9%</div>
+                    <div class="text-xs text-gray-500 mt-1">Uptime</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- API Documentation -->
+    <section id="api" class="py-20 px-4 sm:px-6 lg:px-8 border-t border-dark-600">
+        <div class="max-w-6xl mx-auto">
+            <div class="text-center mb-12">
+                <h2 class="text-3xl font-bold mb-4">API Documentation</h2>
+                <p class="text-gray-400 max-w-2xl mx-auto">
+                    Integrate with our distributed Sudoku solving network. Access real-time matrix encoding 
+                    and ASCII stream synchronization capabilities.
+                </p>
+            </div>
+            
+            <div class="grid lg:grid-cols-3 gap-8">
+                <!-- Sidebar -->
+                <div class="lg:col-span-1">
+                    <div class="bg-dark-700 rounded-xl p-4 border border-dark-500 sticky top-24">
+                        <h3 class="font-semibold mb-4 text-sm text-gray-400 uppercase tracking-wider">Endpoints</h3>
+                        <nav class="space-y-2">
+                            <a href="#ws-stream" class="block px-3 py-2 rounded-lg bg-dark-600 text-accent-cyan text-sm font-mono">
+                                <span class="method-ws">WS</span> /v2/stream
+                            </a>
+                            <a href="#post-solve" class="block px-3 py-2 rounded-lg hover:bg-dark-600 text-gray-300 text-sm font-mono transition-colors">
+                                <span class="method-post">POST</span> /v2/solve
+                            </a>
+                            <a href="#get-matrix" class="block px-3 py-2 rounded-lg hover:bg-dark-600 text-gray-300 text-sm font-mono transition-colors">
+                                <span class="method-get">GET</span> /v2/matrix/:id
+                            </a>
+                            <a href="#post-encode" class="block px-3 py-2 rounded-lg hover:bg-dark-600 text-gray-300 text-sm font-mono transition-colors">
+                                <span class="method-post">POST</span> /v2/encode
+                            </a>
+                        </nav>
+                        
+                        <h3 class="font-semibold mb-4 mt-6 text-sm text-gray-400 uppercase tracking-wider">Resources</h3>
+                        <nav class="space-y-2">
+                            <a href="#" class="block px-3 py-2 rounded-lg hover:bg-dark-600 text-gray-400 text-sm transition-colors">
+                                <i data-lucide="book" class="w-4 h-4 inline mr-2"></i>
+                                SDK Reference
+                            </a>
+                            <a href="#" class="block px-3 py-2 rounded-lg hover:bg-dark-600 text-gray-400 text-sm transition-colors">
+                                <i data-lucide="github" class="w-4 h-4 inline mr-2"></i>
+                                GitHub Repo
+                            </a>
+                        </nav>
+                    </div>
+                </div>
+                
+                <!-- Content -->
+                <div class="lg:col-span-2 space-y-8">
+                    <!-- WebSocket Stream -->
+                    <div id="ws-stream" class="bg-dark-700 rounded-xl p-6 border border-dark-500">
+                        <div class="flex items-center gap-3 mb-4">
+                            <span class="method-ws font-mono font-bold">WS</span>
+                            <code class="text-lg">wss://api.sme.lab/v2/stream</code>
+                        </div>
+                        <p class="text-gray-400 mb-6">
+                            Establish a WebSocket connection to receive real-time ASCII character streams 
+                            from the distributed solving network. Each message contains encoded matrix cell data.
+                        </p>
+                        
+                        <div class="space-y-4">
+                            <div>
+                                <h4 class="text-sm font-semibold mb-2 text-gray-300">Query Parameters</h4>
+                                <div class="code-block rounded-lg p-4">
+                                    <table class="w-full text-sm">
+                                        <tr class="border-b border-dark-600">
+                                            <td class="py-2 font-mono text-accent-cyan">format</td>
+                                            <td class="py-2 text-gray-400">string</td>
+                                            <td class="py-2 text-gray-500">Output format: "ascii", "binary", "hex"</td>
+                                        </tr>
+                                        <tr class="border-b border-dark-600">
+                                            <td class="py-2 font-mono text-accent-cyan">buffer</td>
+                                            <td class="py-2 text-gray-400">integer</td>
+                                            <td class="py-2 text-gray-500">Buffer size in KB (default: 64)</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="py-2 font-mono text-accent-cyan">compress</td>
+                                            <td class="py-2 text-gray-400">boolean</td>
+                                            <td class="py-2 text-gray-500">Enable per-message deflate</td>
+                                        </tr>
+                                    </table>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <h4 class="text-sm font-semibold mb-2 text-gray-300">Example Connection</h4>
+                                <div class="code-block rounded-lg p-4 font-mono text-sm overflow-x-auto">
+                                    <div class="text-gray-500">// JavaScript WebSocket client</div>
+                                    <div class="text-accent-purple">const</div>
+                                    <div class="text-white inline"> ws = </div>
+                                    <div class="text-accent-purple inline">new</div>
+                                    <div class="text-accent-cyan inline"> WebSocket</div>
+                                    <div class="text-white">(</div>
+                                    <div class="text-accent-green">'wss://api.sme.lab/v2/stream?format=ascii&buffer=128'</div>
+                                    <div class="text-white">);</div>
+                                    <div class="mt-2 text-gray-500">// Connection established</div>
+                                    <div class="text-white">ws.onopen = () => </div>
+                                    <div class="text-accent-cyan inline">console</div>
+                                    <div class="text-white">.log(</div>
+                                    <div class="text-accent-green">'Stream connected'</div>
+                                    <div class="text-white">);</div>
+                                    <div class="mt-2 text-gray-500">// Receive ASCII data</div>
+                                    <div class="text-white">ws.onmessage = (event) => </div>
+                                    <div class="text-white">{</div>
+                                    <div class="text-accent-purple ml-4">const</div>
+                                    <div class="text-white inline ml-4"> data = event.data;</div>
+                                    <div class="text-accent-cyan ml-4">console</div>
+                                    <div class="text-white inline">.log(</div>
+                                    <div class="text-accent-green">'Received:'</div>
+                                    <div class="text-white">, data);</div>
+                                    <div class="text-white">};</div>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <h4 class="text-sm font-semibold mb-2 text-gray-300">Message Format</h4>
+                                <div class="code-block rounded-lg p-4 font-mono text-sm">
+                                    <div class="text-gray-500">// Binary frame structure</div>
+                                    <div class="text-white">{</div>
+                                    <div class="ml-4"><span class="text-accent-cyan">"type"</span>: <span class="text-accent-green">"matrix_cell"</span>,</div>
+                                    <div class="ml-4"><span class="text-accent-cyan">"matrix_id"</span>: <span class="text-accent-green">"0x7F3A9B2E"</span>,</div>
+                                    <div class="ml-4"><span class="text-accent-cyan">"position"</span>: { <span class="text-accent-cyan">"row"</span>: <span class="text-accent-purple">3</span>, <span class="text-accent-cyan">"col"</span>: <span class="text-accent-purple">7</span> },</div>
+                                    <div class="ml-4"><span class="text-accent-cyan">"value"</span>: <span class="text-accent-purple">5</span>,</div>
+                                    <div class="ml-4"><span class="text-accent-cyan">"timestamp"</span>: <span class="text-accent-purple">1704067200000</span>,</div>
+                                    <div class="ml-4"><span class="text-accent-cyan">"checksum"</span>: <span class="text-accent-green">"a3f7b2"</span></div>
+                                    <div class="text-white">}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- POST Solve -->
+                    <div id="post-solve" class="bg-dark-700 rounded-xl p-6 border border-dark-500">
+                        <div class="flex items-center gap-3 mb-4">
+                            <span class="method-post font-mono font-bold">POST</span>
+                            <code class="text-lg">https://api.sme.lab/v2/solve</code>
+                        </div>
+                        <p class="text-gray-400 mb-6">
+                            Submit a partial or empty Sudoku matrix and receive the complete solution. 
+                            Supports both synchronous and asynchronous solving modes.
+                        </p>
+                        
+                        <div class="code-block rounded-lg p-4 font-mono text-sm">
+                            <div class="text-gray-500">// Request body</div>
+                            <div class="text-white">{</div>
+                            <div class="ml-4"><span class="text-accent-cyan">"matrix"</span>: [</div>
+                            <div class="ml-8">[<span class="text-accent-purple">5</span>, <span class="text-purple">3</span>, <span class="text-purple">0</span>, <span class="text-purple">0</span>, <span class="text-purple">7</span>, <span class="text-purple">0</span>, <span class="text-purple">0</span>, <span class="text-purple">0</span>, <span class="text-purple">0</span>],</div>
+                            <div class="ml-8">[<span class="text-purple">6</span>, <span class="text-purple">0</span>, <span class="text-purple">0</span>, <span class="text-purple">1</span>, <span class="text-purple">9</span>, <span class="text-purple">5</span>, <span class="text-purple">0</span>, <span class="text-purple">0</span>, <span class="text-purple">0</span>],</div>
+                            <div class="ml-8 text-gray-500">// ... remaining rows</div>
+                            <div class="ml-4">],</div>
+                            <div class="ml-4"><span class="text-accent-cyan">"async"</span>: <span class="text-accent-purple">false</span>,</div>
+                            <div class="ml-4"><span class="text-accent-cyan">"timeout"</span>: <span class="text-accent-purple">30000</span></div>
+                            <div class="text-white">}</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Rate Limits -->
+                    <div class="bg-dark-700/50 rounded-xl p-6 border border-dark-500">
+                        <h4 class="font-semibold mb-4 flex items-center gap-2">
+                            <i data-lucide="alert-circle" class="w-5 h-5 text-yellow-500"></i>
+                            Rate Limits
+                        </h4>
+                        <div class="grid md:grid-cols-3 gap-4 text-sm">
+                            <div class="p-3 rounded-lg bg-dark-800">
+                                <div class="text-gray-500 mb-1">Free Tier</div>
+                                <div class="text-white font-mono">100 req/min</div>
+                            </div>
+                            <div class="p-3 rounded-lg bg-dark-800">
+                                <div class="text-gray-500 mb-1">Pro Tier</div>
+                                <div class="text-white font-mono">10,000 req/min</div>
+                            </div>
+                            <div class="p-3 rounded-lg bg-dark-800">
+                                <div class="text-gray-500 mb-1">Enterprise</div>
+                                <div class="text-white font-mono">Unlimited</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="py-12 px-4 sm:px-6 lg:px-8 border-t border-dark-600">
+        <div class="max-w-6xl mx-auto">
+            <div class="flex flex-col md:flex-row items-center justify-between gap-6">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent-cyan to-accent-purple flex items-center justify-center">
+                        <i data-lucide="grid-3x3" class="w-5 h-5 text-white"></i>
+                    </div>
+                    <span class="font-mono font-semibold">
+                        SME<span class="text-accent-cyan">.</span>Lab
+                    </span>
+                </div>
+                <div class="flex items-center gap-6 text-sm text-gray-500">
+                    <a href="#" class="hover:text-white transition-colors">Privacy</a>
+                    <a href="#" class="hover:text-white transition-colors">Terms</a>
+                    <a href="#" class="hover:text-white transition-colors">Status</a>
+                    <a href="#" class="hover:text-white transition-colors">Contact</a>
+                </div>
+                <div class="text-sm text-gray-600 font-mono">
+                    &copy; 2024 SME Lab. All rights reserved.
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        // ==================== SUDOKU GRID ====================
+        let selectedCell = null;
+        let grid = Array(9).fill(null).map(() => Array(9).fill(0));
+        let fixedCells = Array(9).fill(null).map(() => Array(9).fill(false));
+        let isSolving = false;
+
+        function initGrid() {
+            const gridEl = document.getElementById('sudoku-grid');
+            gridEl.innerHTML = '';
+            
+            for (let row = 0; row < 9; row++) {
+                for (let col = 0; col < 9; col++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'sudoku-cell w-full aspect-square flex items-center justify-center text-lg font-mono cursor-pointer bg-dark-800';
+                    cell.dataset.row = row;
+                    cell.dataset.col = col;
+                    
+                    // Add thicker borders for 3x3 boxes
+                    if (row % 3 === 0) cell.style.borderTop = '2px solid #555';
+                    if (col % 3 === 0) cell.style.borderLeft = '2px solid #555';
+                    if (row === 8) cell.style.borderBottom = '2px solid #555';
+                    if (col === 8) cell.style.borderRight = '2px solid #555';
+                    
+                    cell.addEventListener('click', () => selectCell(row, col));
+                    gridEl.appendChild(cell);
+                }
+            }
+            
+            generatePuzzle();
+        }
+
+        function selectCell(row, col) {
+            if (isSolving) return;
+            
+            document.querySelectorAll('.sudoku-cell').forEach(c => c.classList.remove('selected'));
+            selectedCell = { row, col };
+            const cellEl = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+            cellEl.classList.add('selected');
+        }
+
+        function setCellValue(row, col, value) {
+            grid[row][col] = value;
+            const cellEl = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+            cellEl.textContent = value || '';
+            
+            if (value > 0) {
+                if (fixedCells[row][col]) {
+                    cellEl.classList.add('fixed');
+                } else {
+                    cellEl.classList.add('user-input');
+                }
+            }
+        }
+
+        function generatePuzzle() {
+            // Clear grid
+            grid = Array(9).fill(null).map(() => Array(9).fill(0));
+            fixedCells = Array(9).fill(null).map(() => Array(9).fill(false));
+            
+            document.querySelectorAll('.sudoku-cell').forEach(c => {
+                c.textContent = '';
+                c.classList.remove('fixed', 'user-input', 'solved');
+            });
+            
+            // Generate a solved puzzle
+            solveGrid(grid);
+            
+            // Remove some cells to create puzzle
+            const cellsToRemove = 40 + Math.floor(Math.random() * 15);
+            let removed = 0;
+            
+            while (removed < cellsToRemove) {
+                const row = Math.floor(Math.random() * 9);
+                const col = Math.floor(Math.random() * 9);
+                
+                if (grid[row][col] !== 0) {
+                    grid[row][col] = 0;
+                    removed++;
+                }
+            }
+            
+            // Update display
+            for (let row = 0; row < 9; row++) {
+                for (let col = 0; col < 9; col++) {
+                    if (grid[row][col] !== 0) {
+                        fixedCells[row][col] = true;
+                        setCellValue(row, col, grid[row][col]);
+                    }
+                }
+            }
+            
+            log('Generated new puzzle matrix', 'info');
+        }
+
+        function clearGrid() {
+            if (isSolving) return;
+            
+            for (let row = 0; row < 9; row++) {
+                for (let col = 0; col < 9; col++) {
+                    if (!fixedCells[row][col]) {
+                        grid[row][col] = 0;
+                        const cellEl = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+                        cellEl.textContent = '';
+                        cellEl.classList.remove('user-input', 'solved');
+                    }
+                }
+            }
+            
+            log('Cleared user inputs', 'info');
+        }
+
+        function isValid(grid, row, col, num) {
+            // Check row
+            for (let x = 0; x < 9; x++) {
+                if (grid[row][x] === num) return false;
+            }
+            
+            // Check column
+            for (let x = 0; x < 9; x++) {
+                if (grid[x][col] === num) return false;
+            }
+            
+            // Check 3x3 box
+            const startRow = row - row % 3;
+            const startCol = col - col % 3;
+            for (let i = 0; i < 3; i++) {
+                for (let j = 0; j < 3; j++) {
+                    if (grid[i + startRow][j + startCol] === num) return false;
+                }
+            }
+            
+            return true;
+        }
+
+        function solveGrid(grid) {
+            for (let row = 0; row < 9; row++) {
+                for (let col = 0; col < 9; col++) {
+                    if (grid[row][col] === 0) {
+                        for (let num = 1; num <= 9; num++) {
+                            if (isValid(grid, row, col, num)) {
+                                grid[row][col] = num;
+                                if (solveGrid(grid)) return true;
+                                grid[row][col] = 0;
+                            }
+                        }
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        async function solveSudoku() {
+            if (isSolving) return;
+            isSolving = true;
+            
+            const solveBtn = document.getElementById('solve-btn');
+            solveBtn.disabled = true;
+            solveBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Solving...';
+            lucide.createIcons();
+            
+            const startTime = performance.now();
+            let iterations = 0;
+            let nodes = 0;
+            
+            log('Initializing constraint satisfaction solver...', 'info');
+            log('Building constraint graph...', 'info');
+            
+            // Create a copy of the grid to solve
+            const solution = grid.map(row => [...row]);
+            
+            // Animate solving process
+            await solveWithAnimation(solution, 0, 0, () => {
+                iterations++;
+                nodes++;
+                
+                if (iterations % 50 === 0) {
+                    document.getElementById('iteration-count').textContent = iterations;
+                    document.getElementById('node-count').textContent = nodes;
+                }
+            });
+            
+            const endTime = performance.now();
+            const solveTime = Math.round(endTime - startTime);
+            
+            // Update display with solution
+            for (let row = 0; row < 9; row++) {
+                for (let col = 0; col < 9; col++) {
+                    if (!fixedCells[row][col] && solution[row][col] !== 0) {
+                        await new Promise(r => setTimeout(r, 10));
+                        setCellValue(row, col, solution[row][col]);
+                        const cellEl = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+                        cellEl.classList.add('solved');
+                    }
+                }
+            }
+            
+            document.getElementById('solve-time').textContent = solveTime + 'ms';
+            log(`Solution found in ${solveTime}ms`, 'success');
+            log(`Total iterations: ${iterations}`, 'info');
+            log(`Nodes explored: ${nodes}`, 'info');
+            
+            solveBtn.disabled = false;
+            solveBtn.innerHTML = '<i data-lucide="cpu" class="w-4 h-4"></i> Solve Matrix';
+            lucide.createIcons();
+            isSolving = false;
+        }
+
+        async function solveWithAnimation(grid, row, col, onStep) {
+            if (row === 9) return true;
+            if (col === 9) return solveWithAnimation(grid, row + 1, 0, onStep);
+            if (grid[row][col] !== 0) return solveWithAnimation(grid, row, col + 1, onStep);
+            
+            for (let num = 1; num <= 9; num++) {
+                onStep();
+                
+                if (isValid(grid, row, col, num)) {
+                    grid[row][col] = num;
+                    
+                    if (Math.random() < 0.1) {
+                        log(`Trying value ${num} at (${row},${col})`, 'debug');
+                        await new Promise(r => setTimeout(r, 5));
+                    }
+                    
+                    if (await solveWithAnimation(grid, row, col + 1, onStep)) return true;
+                    
+                    grid[row][col] = 0;
+                    log(`Backtracking from (${row},${col})`, 'debug');
+                }
+            }
+            
+            return false;
+        }
+
+        function validateGrid() {
+            let isValid = true;
+            
+            for (let row = 0; row < 9; row++) {
+                for (let col = 0; col < 9; col++) {
+                    if (grid[row][col] !== 0) {
+                        const num = grid[row][col];
+                        grid[row][col] = 0;
+                        if (!isValid(grid, row, col, num)) {
+                            isValid = false;
+                            const cellEl = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+                            cellEl.style.background = 'rgba(239, 68, 68, 0.3)';
+                            setTimeout(() => {
+                                cellEl.style.background = '';
+                            }, 1000);
+                        }
+                        grid[row][col] = num;
+                    }
+                }
+            }
+            
+            if (isValid) {
+                log('Grid validation: PASSED', 'success');
+            } else {
+                log('Grid validation: FAILED - Conflicts detected', 'error');
+            }
+        }
+
+        function log(message, type = 'info') {
+            const logEl = document.getElementById('computation-log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            
+            const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+            
+            let colorClass = 'text-gray-400';
+            if (type === 'success') colorClass = 'text-accent-green';
+            if (type === 'error') colorClass = 'text-red-500';
+            if (type === 'debug') colorClass = 'text-gray-600';
+            
+            entry.innerHTML = `<span class="text-gray-600">[${timestamp}]</span> <span class="${colorClass}">${message}</span>`;
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        // Keyboard input for Sudoku
+        document.addEventListener('keydown', (e) => {
+            if (!selectedCell || isSolving) return;
+            
+            const { row, col } = selectedCell;
+            
+            if (e.key >= '1' && e.key <= '9') {
+                if (!fixedCells[row][col]) {
+                    setCellValue(row, col, parseInt(e.key));
+                    log(`User input: ${e.key} at (${row},${col})`, 'debug');
+                }
+            } else if (e.key === 'Backspace' || e.key === 'Delete') {
+                if (!fixedCells[row][col]) {
+                    setCellValue(row, col, 0);
+                    const cellEl = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+                    cellEl.classList.remove('user-input');
+                }
+            }
+        });
+
+        // ==================== ASCII TERMINAL ====================
+        let terminalRunning = true;
+        let totalChars = 0;
+        let charHistory = [];
+        const asciiChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=[]{}|;:,.<>?/~`';
+        const hexChars = '0123456789ABCDEF';
+
+        function generateASCIIStream() {
+            const terminal = document.getElementById('terminal-output');
+            const line = document.createElement('div');
+            line.className = 'mb-1';
+            
+            let lineContent = '';
+            const lineLength = 64 + Math.floor(Math.random() * 32);
+            
+            // Generate timestamp prefix
+            const now = new Date();
+            const timestamp = `[${now.toISOString().split('T')[1].split('.')[0]}.${String(now.getMilliseconds()).padStart(3, '0')}]`;
+            
+            lineContent += `<span class="text-gray-600">${timestamp}</span> `;
+            lineContent += `<span class="text-accent-cyan">0x${generateHex(8)}</span> `;
+            
+            // Generate ASCII content
+            for (let i = 0; i < lineLength; i++) {
+                const char = asciiChars[Math.floor(Math.random() * asciiChars.length)];
+                lineContent += `<span class="ascii-char" style="animation-delay: ${i * 0.01}s">${escapeHtml(char)}</span>`;
+                totalChars++;
+            }
+            
+            // Add checksum
+            lineContent += ` <span class="text-gray-600">|</span> <span class="text-accent-green">CHK:${generateHex(4)}</span>`;
+            
+            line.innerHTML = lineContent;
+            terminal.appendChild(line);
+            
+            // Keep only last 100 lines
+            while (terminal.children.length > 100) {
+                terminal.removeChild(terminal.firstChild);
+            }
+            
+            terminal.scrollTop = terminal.scrollHeight;
+            
+            // Update stats
+            document.getElementById('total-chars').textContent = totalChars.toLocaleString();
+            document.getElementById('buffer-size').textContent = Math.floor(totalChars / 1024) + ' KB';
+            
+            // Calculate throughput
+            charHistory.push({ time: Date.now(), count: lineLength });
+            const oneSecondAgo = Date.now() - 1000;
+            charHistory = charHistory.filter(h => h.time > oneSecondAgo);
+            const throughput = charHistory.reduce((sum, h) => sum + h.count, 0);
+            document.getElementById('throughput').textContent = throughput;
+        }
+
+        function generateHex(length) {
+            let result = '';
+            for (let i = 0; i < length; i++) {
+                result += hexChars[Math.floor(Math.random() * hexChars.length)];
+            }
+            return result;
+        }
+
+        function escapeHtml(char) {
+            const div = document.createElement('div');
+            div.textContent = char;
+            return div.innerHTML;
+        }
+
+        function toggleTerminal() {
+            terminalRunning = !terminalRunning;
+            const btn = document.getElementById('terminal-toggle');
+            btn.textContent = terminalRunning ? 'PAUSE' : 'RESUME';
+            btn.className = terminalRunning 
+                ? 'text-xs font-mono px-3 py-1 rounded bg-accent-green/20 text-accent-green'
+                : 'text-xs font-mono px-3 py-1 rounded bg-yellow-500/20 text-yellow-500';
+        }
+
+        // Start ASCII stream
+        setInterval(() => {
+            if (terminalRunning) {
+                generateASCIIStream();
+            }
+        }, 100);
+
+        // Update matrices solved counter
+        setInterval(() => {
+            const el = document.getElementById('matrices-solved');
+            const current = parseInt(el.textContent.replace(',', ''));
+            el.textContent = (current + Math.floor(Math.random() * 3)).toLocaleString();
+        }, 5000);
+
+        // ==================== INITIALIZATION ====================
+        document.addEventListener('DOMContentLoaded', () => {
+            initGrid();
+            
+            // Initial terminal content
+            const terminal = document.getElementById('terminal-output');
+            terminal.innerHTML = `
+                <div class="text-gray-500">// SME Terminal v2.4.1</div>
+                <div class="text-gray-500">// Connecting to distributed solving network...</div>
+                <div class="text-accent-green">// Connection established (wss://api.sme.lab/v2/stream)</div>
+                <div class="text-gray-500">// Subscribed to matrix cell stream</div>
+                <div class="text-gray-500 mb-2">// Waiting for data...</div>
+            `;
+        });
+    </script>
+</body>
+</html>
