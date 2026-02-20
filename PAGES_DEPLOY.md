@@ -50,55 +50,32 @@ ED25519_PUBLIC_KEY = ""
 
 ### 步骤 3：创建 Functions 入口
 
-创建 `functions/api/stream.ts`：
+创建 `functions/api/stream.ts`（已为您准备好）：
 
-```typescript
-import { connect } from 'cloudflare:sockets';
+**主要修改点**（相比 Worker 版本）：
 
-interface Env {
-  SUDOKU_WASM: WebAssembly.Module;
-  SUDOKU_KEY: string;
-  UPSTREAM_HOST: string;
-  UPSTREAM_PORT: string;
-  CIPHER_METHOD: string;
-  ED25519_PRIVATE_KEY?: string;
-}
+1. **路由方式不同**:
+   - Worker: 使用 `export default { fetch }` 处理所有路由
+   - Pages: 使用文件系统路由，`functions/api/stream.ts` 自动对应 `/api/stream` 路径
 
-export const onRequest: PagesFunction<Env> = async (context) => {
-  const { request, env } = context;
-  
-  // 检查 WebSocket 升级
-  const upgradeHeader = request.headers.get('Upgrade');
-  if (upgradeHeader !== 'websocket') {
-    return new Response('Expected WebSocket', { status: 400 });
-  }
-  
-  // 实例化 WASM
-  const wasmInstance = new WebAssembly.Instance(env.SUDOKU_WASM, {
-    env: { abort: () => { throw new Error('Wasm abort'); } }
-  });
-  const exports = wasmInstance.exports as any;
-  
-  // 创建 WebSocket pair
-  const [client, server] = Object.values(new WebSocketPair()) as [WebSocket, WebSocket];
-  
-  // 处理连接...
-  await handleSudokuStream(server, env, exports);
-  
-  return new Response(null, {
-    status: 101,
-    webSocket: client,
-  });
-};
+2. **WASM 绑定方式**:
+   - Worker: `env.SUDOKU_WASM` 是模块绑定
+   - Pages: `env.SUDOKU_WASM` 是 `WebAssembly.Module`，需要手动实例化
 
-async function handleSudokuStream(
-  ws: WebSocket, 
-  env: Env, 
-  wasmExports: any
-): Promise<void> {
-  // 实现 Sudoku 协议处理逻辑
-  // 参考 index.ts 中的实现
-}
+3. **环境变量访问**:
+   - Worker: 通过 `wrangler.toml` 的 `[vars]` 和 Secrets
+   - Pages: 通过 Dashboard 的 Environment Variables 和 Functions Secrets
+
+4. **代码结构**:
+   - Pages Functions 使用 `onRequest` 导出处理函数
+   - 使用 `context.waitUntil()` 处理异步任务
+
+完整的 `functions/api/stream.ts` 已包含：
+- WebSocket 升级处理
+- WASM 实例化和会话初始化
+- 上游 TCP 连接
+- AEAD 加密/解密
+- 数据流转发
 ```
 
 ### 步骤 4：准备静态页面
