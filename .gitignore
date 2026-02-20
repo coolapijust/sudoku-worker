@@ -1,6 +1,38 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
-*.wasm
 *.js.map
+
+# Wrangler
 .wrangler/
 .dev.vars
+
+# Sensitive documents (包含密码)
+MANUAL_DEPLOY.md
+PAGES_DEPLOY.md
+DEPLOY.md
+KEY_MANAGEMENT.md
+CRYPTO_PORTING.md
+
+# History backups
+.history/
+
+# Worker specific (不需要推送到 Pages)
+wrangler.worker.toml
+
+# Local env files
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
