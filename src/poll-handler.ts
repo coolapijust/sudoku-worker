@@ -192,6 +192,19 @@ export async function handleStream(
 
 
 /**
+ * Base64 字符串转 Uint8Array 助手
+ */
+function base64ToBytes(base64: string): Uint8Array {
+  const binaryString = atob(base64.trim());
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+
+/**
  * 处理 /api/v1/upload 端点 - Push 数据
  */
 export async function handleUpload(
@@ -232,25 +245,28 @@ export async function handleUpload(
 
     console.log(`[Upload] Received ${lines.length} lines from client`);
 
-    // 1. 直接将 ASCII 行转换为原始混淆数据 (Sudoku 协议在 Poll 模式下直接传输混淆字符串)
-    const encoder = new TextEncoder();
-    const chunks: Uint8Array[] = [];
-    let totalLen = 0;
+    // 1. 解码所有 Base64 行并合并为原始混淆数据
+    const decodedChunks: Uint8Array[] = [];
+    let totalDecodedLen = 0;
     for (const line of lines) {
-      const b = encoder.encode(line.trim());
-      chunks.push(b);
-      totalLen += b.length;
+      try {
+        const b = base64ToBytes(line);
+        decodedChunks.push(b);
+        totalDecodedLen += b.length;
+      } catch (e) {
+        console.error('[Upload] Base64 decode failed:', e);
+      }
     }
 
-    const totalRaw = new Uint8Array(totalLen);
+    const totalRaw = new Uint8Array(totalDecodedLen);
     let offset = 0;
-    for (const chunk of chunks) {
+    for (const chunk of decodedChunks) {
       totalRaw.set(chunk, offset);
       offset += chunk.length;
     }
 
     const sample = new TextDecoder().decode(totalRaw.slice(0, 100));
-    console.log(`[Upload] Total raw ASCII hints: ${totalRaw.length} bytes`);
+    console.log(`[Upload] Decoded ASCII hints: ${totalRaw.length} bytes`);
     console.log(`[Upload] Sample (first 100 chars): ${sample}`);
     console.log(`[Upload] Starts with SUDOKU? ${sample.startsWith('SUDOKU')}`);
 
