@@ -288,36 +288,67 @@ export async function handleUpload(
         continue;
       }
 
-      // 4. 处理解密后的明文
-      if (session.standaloneMode && !session.targetParsed) {
+      // 4. 处理解密后的明文 (Standalone SOCKS5 握手逻辑)
+      if (session.standaloneMode && !session.socks5ConnectDone) {
         const merged = new Uint8Array(session.bufferOffset.length + decrypted.length);
         merged.set(session.bufferOffset);
         merged.set(decrypted, session.bufferOffset.length);
+        session.bufferOffset = merged;
 
-        const target = parseTargetAddress(merged);
-        if (!target) {
-          session.bufferOffset = merged;
-          continue;
+        // 阶段 1: SOCKS5 Greeting (VER NMETHODS METHODS)
+        if (!session.socks5GreetingDone) {
+          if (session.bufferOffset.length < 3) continue; // 等待更多数据
+          if (session.bufferOffset[0] !== 0x05) {
+            console.error('[SOCKS5] Invalid version in greeting');
+            deleteSession(session.id);
+            return new Response('Invalid SOCKS5', { status: 400 });
+          }
+
+          console.log('[SOCKS5] Handling Greeting');
+          session.socks5GreetingDone = true;
+          session.bufferOffset = session.bufferOffset.slice(3); // 简单处理，假设 0x05 0x01 0x00
+
+          // 回复 0x05 0x00 (No Auth)
+          const reply = session.aead.encrypt(new Uint8Array([0x05, 0x00]));
+          if (reply) notifyData(session, reply);
+
+          // 如果还有剩余数据，继续处理（可能是紧随其后的 Connect 请求）
+          if (session.bufferOffset.length === 0) continue;
         }
 
-        session.targetParsed = true;
-        session.bufferOffset = new Uint8Array(0);
+        // 阶段 2: SOCKS5 Connect 请求 (VER CMD RSV ATYP ADDR PORT)
+        if (!session.socks5ConnectDone) {
+          if (session.bufferOffset.length < 10) continue;
 
-        try {
-          console.log(`[Standalone] Proxy connecting to -> ${target.hostname}:${target.port}`);
-          session.upstreamSocket = connect({ hostname: target.hostname, port: target.port });
-          session.upstreamWriter = session.upstreamSocket.writable.getWriter();
+          // 跳过前 3 字节 (VER CMD RSV) 解析地址
+          const target = parseTargetAddress(session.bufferOffset.subarray(3));
+          if (!target) continue;
 
-          handleUpstreamRead(session);
+          console.log(`[SOCKS5] Target: ${target.hostname}:${target.port}`);
+          session.socks5ConnectDone = true;
+          session.targetParsed = true; // 复用旧标志
 
-          const remainingData = merged.subarray(target.byteLength);
-          if (remainingData.length > 0) {
-            await session.upstreamWriter.write(remainingData);
+          // 回复 Success: VER(0x05) REP(0x00) RSV(0x00) ATYP(0x01) BND.ADDR(0x00*4) BND.PORT(0x00*2)
+          const successReply = session.aead.encrypt(new Uint8Array([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+          if (successReply) notifyData(session, successReply);
+
+          try {
+            console.log(`[Standalone] Connecting to remote host...`);
+            session.upstreamSocket = connect({ hostname: target.hostname, port: target.port });
+            session.upstreamWriter = session.upstreamSocket.writable.getWriter();
+
+            handleUpstreamRead(session);
+
+            const remainingData = session.bufferOffset.subarray(3 + target.byteLength);
+            session.bufferOffset = new Uint8Array(0);
+            if (remainingData.length > 0) {
+              await session.upstreamWriter.write(remainingData);
+            }
+          } catch (e) {
+            console.error(`[Standalone] Connect failed: ${e}`);
+            deleteSession(session.id);
+            return new Response('Target connect failed', { status: 502 });
           }
-        } catch (e) {
-          console.error(`[Standalone] Failed to connect to proxy target: ${e}`);
-          deleteSession(session.id);
-          return new Response('Target connect failed', { status: 502 });
         }
       } else {
         if (session.upstreamWriter) {

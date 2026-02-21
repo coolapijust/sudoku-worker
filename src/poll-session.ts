@@ -18,9 +18,13 @@ export interface Session {
   targetParsed: boolean;
   bufferOffset: Uint8Array;
   pushUnmasked: Uint8Array;
+  // SOCKS5 state
+  socks5GreetingDone: boolean;
+  socks5ConnectDone: boolean;
   // Long-polling signal: resolve() to wake up /stream immediately
   dataNotify: (() => void) | null;
 }
+
 
 
 // 简单的内存会话存储（生产环境应该用 Redis 或 Durable Objects）
@@ -40,8 +44,11 @@ export function createSession(id: string, aead: SudokuAEAD): Session {
     targetParsed: false,
     bufferOffset: new Uint8Array(0),
     pushUnmasked: new Uint8Array(0),
+    socks5GreetingDone: false,
+    socks5ConnectDone: false,
     dataNotify: null,
   };
+
 
   sessions.set(id, session);
   return session;
