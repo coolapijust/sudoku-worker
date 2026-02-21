@@ -192,19 +192,6 @@ export async function handleStream(
 
 
 /**
- * Base64 字符串转 Uint8Array 助手
- */
-function base64ToBytes(base64: string): Uint8Array {
-  const binaryString = atob(base64.trim());
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
-}
-
-
-/**
  * 处理 /api/v1/upload 端点 - Push 数据
  */
 export async function handleUpload(
@@ -245,16 +232,23 @@ export async function handleUpload(
 
     console.log(`[Upload] Received ${lines.length} lines from client`);
 
-    // 1. 解码所有 Base64 行并合并为原始混淆数据
+    // 1. Base64 解码所有行并合并为原始混淆数据
+    // 客户端: 明文 → AEAD加密 → 添加帧头 → Sudoku mask → Base64编码 → 按行发送
     const decodedChunks: Uint8Array[] = [];
     let totalDecodedLen = 0;
     for (const line of lines) {
       try {
-        const b = base64ToBytes(line);
-        decodedChunks.push(b);
-        totalDecodedLen += b.length;
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const binaryString = atob(trimmed);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        decodedChunks.push(bytes);
+        totalDecodedLen += bytes.length;
       } catch (e) {
-        console.error('[Upload] Base64 decode failed:', e);
+        console.error('[Upload] Base64 decode failed for line:', e);
       }
     }
 
@@ -265,10 +259,11 @@ export async function handleUpload(
       offset += chunk.length;
     }
 
-    const sample = new TextDecoder().decode(totalRaw.slice(0, 100));
-    console.log(`[Upload] Decoded ASCII hints: ${totalRaw.length} bytes`);
-    console.log(`[Upload] Sample (first 100 chars): ${sample}`);
-    console.log(`[Upload] Starts with SUDOKU? ${sample.startsWith('SUDOKU')}`);
+    // 采样日志：显示 Base64 解码后的原始字节（应为 Sudoku 混淆的 ASCII 提示符）
+    const sampleText = new TextDecoder().decode(totalRaw.slice(0, 100));
+    console.log(`[Upload] After Base64 decode: ${totalRaw.length} bytes`);
+    console.log(`[Upload] Decoded sample (first 100 chars): ${sampleText}`);
+
 
     // 2. 整体去混淆并存入会话缓冲区 (Poll 模式必须流式处理)
     const unmasked = session.aead.unmask(totalRaw);
