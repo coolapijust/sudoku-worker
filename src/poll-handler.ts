@@ -234,13 +234,14 @@ export async function handleUpload(
   }
 
   try {
-    // 读取请求体数据为文本（因为 Poll 模式下是 Base64 行）
     const bodyText = await request.text();
     const lines = bodyText.split('\n').filter(line => line.trim().length > 0);
 
-    if (lines.length > 0) {
-      console.log(`[Upload] Received ${lines.length} lines from client`);
+    if (lines.length === 0) {
+      return new Response('OK', { status: 200 });
     }
+
+    console.log(`[Upload] Received ${lines.length} lines from client`);
 
     // 1. 解码所有 Base64 行并合并为原始混淆数据
     const decodedChunks: Uint8Array[] = [];

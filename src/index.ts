@@ -81,11 +81,14 @@ export default {
 
       console.log(`[DEBUG] ${request.method} ${pathname} from ${request.headers.get('user-agent') || 'unknown'}`);
 
-      // 获取 WASM 实例
+      // 获取 WASM 实例并重置内存池以防止泄露
       let wasm: any;
       try {
         const wasmInstance = await getWasmInstance();
         wasm = wasmInstance.exports;
+        if (wasm.arenaReset) {
+          wasm.arenaReset();
+        }
       } catch (err) {
         console.error(`[WASM Error] ${err}`);
         return new Response(`WASM Error: ${err}`, { status: 500 });

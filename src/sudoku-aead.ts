@@ -130,6 +130,7 @@ export class SudokuAEAD {
 
 
   private maskData(data: Uint8Array): Uint8Array {
+    if (data.length === 0) return new Uint8Array(0);
     const ptr = this.wasm.arenaMalloc(data.length);
     if (!ptr) throw new Error('Alloc failed');
     try {
@@ -146,6 +147,7 @@ export class SudokuAEAD {
   }
 
   private unmaskData(data: Uint8Array): Uint8Array {
+    if (data.length === 0) return new Uint8Array(0);
     const ptr = this.wasm.arenaMalloc(data.length);
     if (!ptr) throw new Error('Alloc failed');
     try {

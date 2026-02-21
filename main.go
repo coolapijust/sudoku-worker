@@ -133,6 +133,11 @@ func arenaMalloc(size uint32) uint32 {
 	return ptr
 }
 
+//export arenaReset
+func arenaReset() {
+	arenaPtr = heapBase
+}
+
 //export arenaFree
 func arenaFree(ptr uint32) {
 	_ = ptr

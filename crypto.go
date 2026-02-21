@@ -121,7 +121,8 @@ func aeadEncryptChaCha20Poly1305(
 	// 使用 arena 作为临时缓冲区
 	// 注意: 这里假设 plaintext 和 out 不重叠
 	plaintext := arena[plaintextPtr : plaintextPtr+plaintextLen]
-	out := arena[outPtr : outPtr+plaintextLen+16]
+	// 预留前 12 字节给 nonce
+	out := arena[outPtr+12 : outPtr+12+plaintextLen+16]
 	
 	resultLen := chacha20poly1305Seal(
 		&session.key,
@@ -136,8 +137,13 @@ func aeadEncryptChaCha20Poly1305(
 	if resultLen == 0 {
 		return 0
 	}
+
+	// 将 nonce 拷贝到输出的最前面
+	for i := 0; i < 12; i++ {
+		arena[outPtr+uint32(i)] = nonce[i]
+	}
 	
-	return uint32(resultLen)
+	return uint32(resultLen + 12)
 }
 
 // aeadDecryptChaCha20Poly1305 - ChaCha20-Poly1305 解密
