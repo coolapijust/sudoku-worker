@@ -279,7 +279,13 @@ export async function handleUpload(
 
 
     // 2. 整体去混淆并存入会话缓冲区 (Poll 模式必须流式处理)
-    const unmasked = session.aead.unmask(totalRaw);
+    let unmasked = session.aead.unmask(totalRaw);
+    if (unmasked.length === 0 && totalRaw.length > 0) {
+      // 快速兼容兜底：部分客户端可能发送未做 Sudoku 混淆的帧流。
+      // 在 unmask 为空时，尝试直接按帧解析原始字节。
+      console.warn('[Upload] Unmask returned 0 bytes, fallback to raw frame stream');
+      unmasked = totalRaw;
+    }
     console.log(`[Upload] Unmasked: ${unmasked.length} bytes, first16: ${Array.from(unmasked.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
 
     const newPushBuffer = new Uint8Array(session.pushUnmasked.length + unmasked.length);
