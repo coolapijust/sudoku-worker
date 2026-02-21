@@ -4,9 +4,24 @@ compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
+# 上游服务器配置 (如果使用 SOCKS5 代理模式，此项可留空或保留默认)
+UPSTREAM_HOST = ""
+UPSTREAM_PORT = "443"
+
+# 加密与布局配置
 CIPHER_METHOD = "chacha20-poly1305"
 LAYOUT_MODE = "ascii"
 
-# 环境变量需要在 Cloudflare Dashboard 中设置：
-# - SUDOKU_KEY: 64位十六进制密钥
-# - UPSTREAM_HOST: 上游服务器地址
+# 盐值配置
+KEY_DERIVE_SALT = "sudoku-v2-edge-salt"
+STANDALONE_PROXY = "true"
+
+# Wasm 模块绑定
+[wasm_modules]
+SUDOKU_WASM = "./sudoku.wasm"
+
+# 告诉 wrangler 如何处理 .wasm 文件导入
+[[rules]]
+type = "CompiledWasm"
+globs = ["**/*.wasm"]
+fallthrough = true
