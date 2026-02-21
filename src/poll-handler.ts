@@ -253,16 +253,22 @@ export async function handleUpload(
 
     // 2. 整体去混淆并存入会话缓冲区 (Poll 模式必须流式处理)
     const unmasked = session.aead.unmask(totalRaw);
+    console.log(`[Upload] Unmasked: ${unmasked.length} bytes, first16: ${Array.from(unmasked.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+
     const newPushBuffer = new Uint8Array(session.pushUnmasked.length + unmasked.length);
     newPushBuffer.set(session.pushUnmasked);
     newPushBuffer.set(unmasked, session.pushUnmasked.length);
     session.pushUnmasked = newPushBuffer;
 
+    console.log(`[Upload] pushUnmasked buffer: ${session.pushUnmasked.length} bytes`);
+
     // 3. 循环解析完整的 AEAD 帧
     while (session.pushUnmasked.length >= 2) {
       const frameLen = (session.pushUnmasked[0] << 8) | session.pushUnmasked[1];
+      console.log(`[Upload] Frame header: len=${frameLen}, bufferAvail=${session.pushUnmasked.length}`);
       if (session.pushUnmasked.length < 2 + frameLen) {
-        break; // 数据不足一个完整帧，等待后续上传
+        console.log(`[Upload] Incomplete frame, need ${2 + frameLen}, have ${session.pushUnmasked.length}`);
+        break;
       }
 
       // 提取一帧进行解密
