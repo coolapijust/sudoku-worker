@@ -13,6 +13,19 @@ import { parseTargetAddress } from './address';
 const DEFAULT_UPSTREAM_PORT = 443;
 
 /**
+ * Base64 字符串转 Uint8Array 助手
+ */
+function base64ToBytes(base64: string): Uint8Array {
+  const binaryString = atob(base64.trim());
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+
+/**
  * 处理 /session 端点 - 初始化会话
  */
 export async function handleSession(
@@ -221,59 +234,72 @@ export async function handleUpload(
   }
 
   try {
-    // 读取请求体数据
-    const data = new Uint8Array(await request.arrayBuffer());
+    // 读取请求体数据为文本（因为 Poll 模式下是 Base64 行）
+    const bodyText = await request.text();
+    const lines = bodyText.split('\n').filter(line => line.trim().length > 0);
 
-    // 解密数据
-    const decrypted = session.aead.decrypt(data);
-    if (!decrypted) {
-      return new Response('Decryption failed', { status: 400 });
-    }
-
-    if (session.standaloneMode && !session.targetParsed) {
-      // 拼接待解析的缓冲数据
-      const merged = new Uint8Array(session.bufferOffset.length + decrypted.length);
-      merged.set(session.bufferOffset);
-      merged.set(decrypted, session.bufferOffset.length);
-
-      const target = parseTargetAddress(merged);
-      if (!target) {
-        // 数据不够，继续等待
-        session.bufferOffset = merged;
-        return new Response('OK', { status: 200 });
-      }
-
-      session.targetParsed = true;
-      session.bufferOffset = new Uint8Array(0);
-
+    for (const line of lines) {
+      // 1. 解码 Base64
+      let ciphertext: Uint8Array;
       try {
-        console.log(`[Standalone] Proxy connecting to -> ${target.hostname}:${target.port}`);
-        session.upstreamSocket = connect({ hostname: target.hostname, port: target.port });
-        session.upstreamWriter = session.upstreamSocket.writable.getWriter();
-
-        handleUpstreamRead(session);
-
-        const remainingData = merged.subarray(target.byteLength);
-        if (remainingData.length > 0) {
-          await session.upstreamWriter.write(remainingData);
-        }
+        ciphertext = base64ToBytes(line);
       } catch (e) {
-        console.error(`[Standalone] Failed to connect to proxy target: ${e}`);
-        deleteSession(session.id);
-        return new Response('Target connect failed', { status: 502 });
+        console.error('[Upload] Base64 decode failed:', e);
+        continue;
       }
-    } else {
-      // 发送到上游 (常规模式)
-      if (session.upstreamWriter) {
-        await session.upstreamWriter.write(decrypted);
+
+      // 2. 解密数据
+      const decrypted = session.aead.decrypt(ciphertext);
+      if (!decrypted) {
+        console.error('[Upload] Decryption failed for a chunk');
+        continue;
+      }
+
+      // 3. 处理解密后的明文 (Standalone 逻辑不变)
+      if (session.standaloneMode && !session.targetParsed) {
+        const merged = new Uint8Array(session.bufferOffset.length + decrypted.length);
+        merged.set(session.bufferOffset);
+        merged.set(decrypted, session.bufferOffset.length);
+
+        const target = parseTargetAddress(merged);
+        if (!target) {
+          session.bufferOffset = merged;
+          continue;
+        }
+
+        session.targetParsed = true;
+        session.bufferOffset = new Uint8Array(0);
+
+        try {
+          console.log(`[Standalone] Proxy connecting to -> ${target.hostname}:${target.port}`);
+          session.upstreamSocket = connect({ hostname: target.hostname, port: target.port });
+          session.upstreamWriter = session.upstreamSocket.writable.getWriter();
+
+          handleUpstreamRead(session);
+
+          const remainingData = merged.subarray(target.byteLength);
+          if (remainingData.length > 0) {
+            await session.upstreamWriter.write(remainingData);
+          }
+        } catch (e) {
+          console.error(`[Standalone] Failed to connect to proxy target: ${e}`);
+          deleteSession(session.id);
+          return new Response('Target connect failed', { status: 502 });
+        }
+      } else {
+        if (session.upstreamWriter) {
+          await session.upstreamWriter.write(decrypted);
+        }
       }
     }
 
     return new Response('OK', { status: 200 });
   } catch (err) {
+    console.error('[Upload] Error:', err);
     return new Response(`Error: ${err}`, { status: 500 });
   }
 }
+
 
 /**
  * 处理 /fin 端点 - 结束写入
