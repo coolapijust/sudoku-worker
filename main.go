@@ -379,19 +379,17 @@ func unmask(id int32, inPtr uint32, inLen uint32) uint32 {
 			continue
 		}
 
-		if (b & 0x30) != 0 {
-			hintBuf[hintCount] = b
-			hintCount++
+		hintBuf[hintCount] = b
+		hintCount++
 
-			if hintCount == 4 {
-				key := packHintsToKey(hintBuf)
-				val, found := decodeTableLookup(key)
-				if found {
-					arena[out+outPos] = val
-					outPos++
-				}
-				hintCount = 0
+		if hintCount == 4 {
+			key := packHintsToKey(hintBuf)
+			val, found := decodeTableLookup(key)
+			if found {
+				arena[out+outPos] = val
+				outPos++
 			}
+			hintCount = 0
 		}
 	}
 
