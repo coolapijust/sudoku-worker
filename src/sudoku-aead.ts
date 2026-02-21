@@ -42,6 +42,7 @@ export class SudokuAEAD {
   // 简化的 encrypt/decrypt 方法（用于 poll-handler）
   encrypt(data: Uint8Array): Uint8Array | null {
     try {
+      // 1. AEAD 加密
       const inPtr = this.wasm.arenaMalloc(data.length);
       const outPtr = this.wasm.arenaMalloc(data.length + 16); // AEAD overhead
       if (!inPtr || !outPtr) return null;
@@ -56,27 +57,35 @@ export class SudokuAEAD {
         return null;
       }
 
-      const result = new Uint8Array(this.wasm.memory.buffer, outPtr, resultLen).slice();
+      const ciphertext = new Uint8Array(this.wasm.memory.buffer, outPtr, resultLen).slice();
 
       this.wasm.arenaFree(inPtr);
       this.wasm.arenaFree(outPtr);
-      return result;
+
+      // 2. Sudoku 混淆 (Masking)
+      return this.maskData(ciphertext);
     } catch (e) {
       console.error('[AEAD] Encrypt error:', e);
       return null;
     }
   }
 
+
   decrypt(data: Uint8Array): Uint8Array | null {
     try {
-      const inPtr = this.wasm.arenaMalloc(data.length);
-      const outPtr = this.wasm.arenaMalloc(data.length);
+      // 1. Sudoku 去混淆 (Unmasking)
+      const unmasked = this.unmaskData(data);
+      if (unmasked.length === 0) return null;
+
+      // 2. AEAD 解密
+      const inPtr = this.wasm.arenaMalloc(unmasked.length);
+      const outPtr = this.wasm.arenaMalloc(unmasked.length);
       if (!inPtr || !outPtr) return null;
 
       const memory = new Uint8Array(this.wasm.memory.buffer);
-      memory.set(data, inPtr);
+      memory.set(unmasked, inPtr);
 
-      const resultLen = this.wasm.aeadDecrypt(this.sessionId, inPtr, data.length, outPtr);
+      const resultLen = this.wasm.aeadDecrypt(this.sessionId, inPtr, unmasked.length, outPtr);
       if (resultLen === 0) {
         this.wasm.arenaFree(inPtr);
         this.wasm.arenaFree(outPtr);
@@ -93,6 +102,7 @@ export class SudokuAEAD {
       return null;
     }
   }
+
 
 
   private maskData(data: Uint8Array): Uint8Array {
@@ -138,17 +148,19 @@ export function hexToBytes(hex: string): Uint8Array {
 
 export function getCipherType(method: string): number {
   const map: Record<string, number> = {
-    'chacha20-poly1305': 0,
+    'none': 0,
     'aes-128-gcm': 1,
-    'aes-256-gcm': 2,
+    'chacha20-poly1305': 2,
+    'aes-256-gcm': 3,
   };
-  return map[method.toLowerCase()] ?? 1;
+  return map[method.toLowerCase()] ?? 2; // 默认使用 ChaCha20
 }
 
 export function getLayoutType(mode: string): number {
   const map: Record<string, number> = {
     'ascii': 0,
-    'binary': 1,
+    'entropy': 1,
   };
   return map[mode.toLowerCase()] ?? 0;
 }
+
