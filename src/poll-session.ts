@@ -17,9 +17,11 @@ export interface Session {
   standaloneMode: boolean;
   targetParsed: boolean;
   bufferOffset: Uint8Array;
+  pushUnmasked: Uint8Array;
   // Long-polling signal: resolve() to wake up /stream immediately
   dataNotify: (() => void) | null;
 }
+
 
 // 简单的内存会话存储（生产环境应该用 Redis 或 Durable Objects）
 const sessions = new Map<string, Session>();
@@ -37,8 +39,10 @@ export function createSession(id: string, aead: SudokuAEAD): Session {
     standaloneMode: false,
     targetParsed: false,
     bufferOffset: new Uint8Array(0),
+    pushUnmasked: new Uint8Array(0),
     dataNotify: null,
   };
+
   sessions.set(id, session);
   return session;
 }

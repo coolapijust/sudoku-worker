@@ -63,16 +63,14 @@ export class SudokuAEAD {
       this.wasm.arenaFree(inPtr);
       this.wasm.arenaFree(outPtr);
 
-      // 2. Sudoku 混淆 (Masking)
-      const masked = this.maskData(ciphertext);
+      // 2. 添加 2 字节长协议头 (BigEndian, 包含 ciphertext 长度)
+      const frame = new Uint8Array(2 + ciphertext.length);
+      frame[0] = (ciphertext.length >> 8) & 0xFF;
+      frame[1] = ciphertext.length & 0xFF;
+      frame.set(ciphertext, 2);
 
-      // 3. 添加 2 字节长协议头 (BigEndian, 包含所有数据的长度，不含头自身)
-      const frame = new Uint8Array(2 + masked.length);
-      frame[0] = (masked.length >> 8) & 0xFF;
-      frame[1] = masked.length & 0xFF;
-      frame.set(masked, 2);
-
-      return frame;
+      // 3. 统一混淆 (Masking)
+      return this.maskData(frame);
     } catch (e) {
       console.error('[AEAD] Encrypt error:', e);
       return null;
@@ -83,28 +81,24 @@ export class SudokuAEAD {
 
   decrypt(data: Uint8Array): Uint8Array | null {
     try {
-      // 1. 读取 2 字节协议头
+      // 1. 读取 2 字节协议头 (假设 data 已经是去混淆后的)
       if (data.length < 2) return null;
       const frameLen = (data[0] << 8) | data[1];
       if (data.length < 2 + frameLen) {
-        console.warn(`[AEAD] Incomplete frame: header expects ${frameLen}, got ${data.length - 2}`);
+        // 数据不够
         return null;
       }
-      const rawPayload = data.subarray(2, 2 + frameLen);
+      const ciphertext = data.subarray(2, 2 + frameLen);
 
-      // 2. Sudoku 去混淆 (Unmasking)
-      const unmasked = this.unmaskData(rawPayload);
-      if (unmasked.length === 0) return null;
-
-      // 3. AEAD 解密
-      const inPtr = this.wasm.arenaMalloc(unmasked.length);
-      const outPtr = this.wasm.arenaMalloc(unmasked.length + 64);
+      // 2. AEAD 解密
+      const inPtr = this.wasm.arenaMalloc(ciphertext.length);
+      const outPtr = this.wasm.arenaMalloc(ciphertext.length + 64);
       if (!inPtr || !outPtr) return null;
 
       const memory = new Uint8Array(this.wasm.memory.buffer);
-      memory.set(unmasked, inPtr);
+      memory.set(ciphertext, inPtr);
 
-      const resultLen = this.wasm.aeadDecrypt(this.sessionId, inPtr, unmasked.length, outPtr);
+      const resultLen = this.wasm.aeadDecrypt(this.sessionId, inPtr, ciphertext.length, outPtr);
       if (resultLen === 0) {
         console.error('[AEAD] Wasm decrypt failed');
         this.wasm.arenaFree(inPtr);
@@ -122,6 +116,15 @@ export class SudokuAEAD {
       return null;
     }
   }
+
+  mask(data: Uint8Array): Uint8Array {
+    return this.maskData(data);
+  }
+
+  unmask(data: Uint8Array): Uint8Array {
+    return this.unmaskData(data);
+  }
+
 
 
 

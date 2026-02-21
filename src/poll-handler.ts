@@ -242,25 +242,53 @@ export async function handleUpload(
       console.log(`[Upload] Received ${lines.length} lines from client`);
     }
 
+    // 1. 解码所有 Base64 行并合并为原始混淆数据
+    const decodedChunks: Uint8Array[] = [];
+    let totalDecodedLen = 0;
     for (const line of lines) {
-      // 1. 解码 Base64
-      let ciphertext: Uint8Array;
       try {
-        ciphertext = base64ToBytes(line);
+        const b = base64ToBytes(line);
+        decodedChunks.push(b);
+        totalDecodedLen += b.length;
       } catch (e) {
         console.error('[Upload] Base64 decode failed:', e);
-        continue;
+      }
+    }
+
+    const totalRaw = new Uint8Array(totalDecodedLen);
+    let offset = 0;
+    for (const chunk of decodedChunks) {
+      totalRaw.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    // 2. 整体去混淆并存入会话缓冲区 (Poll 模式必须流式处理)
+    const unmasked = session.aead.unmask(totalRaw);
+    const newPushBuffer = new Uint8Array(session.pushUnmasked.length + unmasked.length);
+    newPushBuffer.set(session.pushUnmasked);
+    newPushBuffer.set(unmasked, session.pushUnmasked.length);
+    session.pushUnmasked = newPushBuffer;
+
+    // 3. 循环解析完整的 AEAD 帧
+    while (session.pushUnmasked.length >= 2) {
+      const frameLen = (session.pushUnmasked[0] << 8) | session.pushUnmasked[1];
+      if (session.pushUnmasked.length < 2 + frameLen) {
+        break; // 数据不足一个完整帧，等待后续上传
       }
 
-      // 2. 解密数据 (SudokuAEAD 现在会自动处理协议头和 Unmask)
-      const decrypted = session.aead.decrypt(ciphertext);
+      // 提取一帧进行解密
+      const frame = session.pushUnmasked.subarray(0, 2 + frameLen);
+      const decrypted = session.aead.decrypt(frame);
+
+      // 滑动缓冲区窗口
+      session.pushUnmasked = session.pushUnmasked.slice(2 + frameLen);
+
       if (!decrypted) {
-        console.error(`[Upload] Decryption failed for chunk (len: ${ciphertext.length})`);
+        console.error(`[Upload] Decryption failed for frame (expected len: ${frameLen})`);
         continue;
       }
 
-
-      // 3. 处理解密后的明文 (Standalone 逻辑不变)
+      // 4. 处理解密后的明文
       if (session.standaloneMode && !session.targetParsed) {
         const merged = new Uint8Array(session.bufferOffset.length + decrypted.length);
         merged.set(session.bufferOffset);
