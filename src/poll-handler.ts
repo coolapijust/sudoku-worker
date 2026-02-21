@@ -238,6 +238,10 @@ export async function handleUpload(
     const bodyText = await request.text();
     const lines = bodyText.split('\n').filter(line => line.trim().length > 0);
 
+    if (lines.length > 0) {
+      console.log(`[Upload] Received ${lines.length} lines from client`);
+    }
+
     for (const line of lines) {
       // 1. 解码 Base64
       let ciphertext: Uint8Array;
@@ -248,12 +252,13 @@ export async function handleUpload(
         continue;
       }
 
-      // 2. 解密数据
+      // 2. 解密数据 (SudokuAEAD 现在会自动处理协议头和 Unmask)
       const decrypted = session.aead.decrypt(ciphertext);
       if (!decrypted) {
-        console.error('[Upload] Decryption failed for a chunk');
+        console.error(`[Upload] Decryption failed for chunk (len: ${ciphertext.length})`);
         continue;
       }
+
 
       // 3. 处理解密后的明文 (Standalone 逻辑不变)
       if (session.standaloneMode && !session.targetParsed) {
@@ -382,13 +387,19 @@ async function handleUpstreamRead(session: any): Promise<void> {
 
     while (!session.closed) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        console.log('[Upstream] EOF reached');
+        break;
+      }
+
+      console.log(`[Upstream] Read ${value.length} bytes from remote`);
 
       // 加密数据后，通过 notifyData 推入 pullBuffer 并唤醒 /stream
       const encrypted = session.aead.encrypt(value);
       if (encrypted) {
         notifyData(session, encrypted);
       }
+
     }
   } catch (err) {
     console.error('[Upstream] Read error:', err);

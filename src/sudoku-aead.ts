@@ -44,26 +44,35 @@ export class SudokuAEAD {
     try {
       // 1. AEAD 加密
       const inPtr = this.wasm.arenaMalloc(data.length);
-      const outPtr = this.wasm.arenaMalloc(data.length + 16); // AEAD overhead
+      const outPtr = this.wasm.arenaMalloc(data.length + 64); // 预留足够开销 (Nonce 12 + Tag 16 + padding)
       if (!inPtr || !outPtr) return null;
 
       const memory = new Uint8Array(this.wasm.memory.buffer);
       memory.set(data, inPtr);
 
-      const resultLen = this.wasm.aeadEncrypt(this.sessionId, inPtr, data.length, outPtr);
-      if (resultLen === 0) {
+      const ciphertextLen = this.wasm.aeadEncrypt(this.sessionId, inPtr, data.length, outPtr);
+      if (ciphertextLen === 0) {
+        console.error('[AEAD] Wasm encrypt failed');
         this.wasm.arenaFree(inPtr);
         this.wasm.arenaFree(outPtr);
         return null;
       }
 
-      const ciphertext = new Uint8Array(this.wasm.memory.buffer, outPtr, resultLen).slice();
+      const ciphertext = new Uint8Array(this.wasm.memory.buffer, outPtr, ciphertextLen).slice();
 
       this.wasm.arenaFree(inPtr);
       this.wasm.arenaFree(outPtr);
 
       // 2. Sudoku 混淆 (Masking)
-      return this.maskData(ciphertext);
+      const masked = this.maskData(ciphertext);
+
+      // 3. 添加 2 字节长协议头 (BigEndian, 包含所有数据的长度，不含头自身)
+      const frame = new Uint8Array(2 + masked.length);
+      frame[0] = (masked.length >> 8) & 0xFF;
+      frame[1] = masked.length & 0xFF;
+      frame.set(masked, 2);
+
+      return frame;
     } catch (e) {
       console.error('[AEAD] Encrypt error:', e);
       return null;
@@ -71,15 +80,25 @@ export class SudokuAEAD {
   }
 
 
+
   decrypt(data: Uint8Array): Uint8Array | null {
     try {
-      // 1. Sudoku 去混淆 (Unmasking)
-      const unmasked = this.unmaskData(data);
+      // 1. 读取 2 字节协议头
+      if (data.length < 2) return null;
+      const frameLen = (data[0] << 8) | data[1];
+      if (data.length < 2 + frameLen) {
+        console.warn(`[AEAD] Incomplete frame: header expects ${frameLen}, got ${data.length - 2}`);
+        return null;
+      }
+      const rawPayload = data.subarray(2, 2 + frameLen);
+
+      // 2. Sudoku 去混淆 (Unmasking)
+      const unmasked = this.unmaskData(rawPayload);
       if (unmasked.length === 0) return null;
 
-      // 2. AEAD 解密
+      // 3. AEAD 解密
       const inPtr = this.wasm.arenaMalloc(unmasked.length);
-      const outPtr = this.wasm.arenaMalloc(unmasked.length);
+      const outPtr = this.wasm.arenaMalloc(unmasked.length + 64);
       if (!inPtr || !outPtr) return null;
 
       const memory = new Uint8Array(this.wasm.memory.buffer);
@@ -87,6 +106,7 @@ export class SudokuAEAD {
 
       const resultLen = this.wasm.aeadDecrypt(this.sessionId, inPtr, unmasked.length, outPtr);
       if (resultLen === 0) {
+        console.error('[AEAD] Wasm decrypt failed');
         this.wasm.arenaFree(inPtr);
         this.wasm.arenaFree(outPtr);
         return null;
@@ -102,6 +122,7 @@ export class SudokuAEAD {
       return null;
     }
   }
+
 
 
 
