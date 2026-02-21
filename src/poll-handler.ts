@@ -12,17 +12,6 @@ import { parseTargetAddress } from './address';
 // 默认配置
 const DEFAULT_UPSTREAM_PORT = 443;
 
-/**
- * Base64 字符串转 Uint8Array 助手
- */
-function base64ToBytes(base64: string): Uint8Array {
-  const binaryString = atob(base64.trim());
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
-}
 
 
 /**
@@ -243,25 +232,24 @@ export async function handleUpload(
 
     console.log(`[Upload] Received ${lines.length} lines from client`);
 
-    // 1. 解码所有 Base64 行并合并为原始混淆数据
-    const decodedChunks: Uint8Array[] = [];
-    let totalDecodedLen = 0;
+    // 1. 直接将 ASCII 行转换为原始混淆数据 (Sudoku 协议在 Poll 模式下直接传输混淆字符串)
+    const encoder = new TextEncoder();
+    const chunks: Uint8Array[] = [];
+    let totalLen = 0;
     for (const line of lines) {
-      try {
-        const b = base64ToBytes(line);
-        decodedChunks.push(b);
-        totalDecodedLen += b.length;
-      } catch (e) {
-        console.error('[Upload] Base64 decode failed:', e);
-      }
+      const b = encoder.encode(line.trim());
+      chunks.push(b);
+      totalLen += b.length;
     }
 
-    const totalRaw = new Uint8Array(totalDecodedLen);
+    const totalRaw = new Uint8Array(totalLen);
     let offset = 0;
-    for (const chunk of decodedChunks) {
+    for (const chunk of chunks) {
       totalRaw.set(chunk, offset);
       offset += chunk.length;
     }
+
+    console.log(`[Upload] Total raw ASCII hints: ${totalRaw.length} bytes`);
 
     // 2. 整体去混淆并存入会话缓冲区 (Poll 模式必须流式处理)
     const unmasked = session.aead.unmask(totalRaw);
