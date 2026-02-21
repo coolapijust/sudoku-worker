@@ -4,7 +4,7 @@
 
 import { Env } from './index';
 import { TunnelAuth, TunnelMode, extractAuth } from './auth';
-import { createSession, getSession, deleteSession, generateSessionId } from './poll-session';
+import { createSession, getSession, deleteSession, generateSessionId, notifyData, waitForData } from './poll-session';
 import { SudokuAEAD, hexToBytes, getCipherType, getLayoutType } from './sudoku-aead';
 import { connect } from 'cloudflare:sockets';
 import { parseTargetAddress } from './address';
@@ -104,7 +104,13 @@ export async function handleSession(
 }
 
 /**
- * 处理 /stream 端点 - Pull 数据
+ * 处理 /stream 端点 - Pull 数据 (长轮询模式)
+ *
+ * 设计：
+ * - 若 pullBuffer 中没有数据，则挂起等待（最长 25s），避免 100ms 内断流导致 Clash 管道崩溃。
+ * - 每 5s 发送一行空心跳（\n），防止 Cloudflare 因空闲连接提前关闭。
+ * - Cloudflare Worker 请求限制 ~30s CPU，25s 超时后优雅关闭，让客户端续期重连。
+ * - 连接关闭或 session 关闭时立即退出循环。
  */
 export async function handleStream(
   request: Request,
@@ -114,14 +120,12 @@ export async function handleStream(
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  // 获取 token（支持 token 和 session 参数）
   const url = new URL(request.url);
   const token = url.searchParams.get('token') || url.searchParams.get('session');
   if (!token) {
     return new Response('Missing session', { status: 400 });
   }
 
-  // 验证认证
   const auth = new TunnelAuth(env.SUDOKU_KEY);
   const { header, query } = extractAuth(request);
   const isValid = await auth.verify(header, query, 'poll', 'GET', '/stream');
@@ -134,28 +138,44 @@ export async function handleStream(
     return new Response('Session not found', { status: 404 });
   }
 
-  // 创建 ReadableStream，从 pullBuffer 中读取数据
+  // 长轮询逻辑：最多挂起 25s，期间每 5s 发心跳
+  const LONG_POLL_TIMEOUT_MS = 25_000;
+  const HEARTBEAT_INTERVAL_MS = 5_000;
+  const startTime = Date.now();
+
   const stream = new ReadableStream({
-    start(controller) {
-      const sendData = async () => {
-        try {
-          while (session.pullBuffer.length > 0) {
-            const data = session.pullBuffer.shift()!;
-            // Base64 编码
-            const base64 = btoa(String.fromCharCode(...data));
-            controller.enqueue(new TextEncoder().encode(base64 + '\n'));
+    async start(controller) {
+      const encoder = new TextEncoder();
+      try {
+        while (!session.closed) {
+          const elapsed = Date.now() - startTime;
+          const remaining = LONG_POLL_TIMEOUT_MS - elapsed;
+          if (remaining <= 0) break; // 超时，让客户端续期重连
+
+          // 若有数据，立即全部推送
+          if (session.pullBuffer.length > 0) {
+            while (session.pullBuffer.length > 0) {
+              const data = session.pullBuffer.shift()!;
+              const base64 = btoa(String.fromCharCode(...data));
+              controller.enqueue(encoder.encode(base64 + '\n'));
+            }
+            // 推送完数据后继续等待（不立即关闭，让同一个 /stream 连接继续服务）
+          } else {
+            // 无数据：等待信号或心跳超时（取两者较小值）
+            const waitTime = Math.min(remaining, HEARTBEAT_INTERVAL_MS);
+            await waitForData(session, waitTime);
+
+            // 等待结束后：如果仍然没有数据，发一行心跳保活
+            if (session.pullBuffer.length === 0 && !session.closed) {
+              controller.enqueue(encoder.encode('\n'));
+            }
           }
-
-          // 如果没有数据，等待一段时间后关闭
-          setTimeout(() => {
-            controller.close();
-          }, 100);
-        } catch (err) {
-          controller.error(err);
         }
-      };
-
-      sendData();
+      } catch (err) {
+        controller.error(err);
+      } finally {
+        controller.close();
+      }
     },
   });
 
@@ -167,6 +187,7 @@ export async function handleStream(
     },
   });
 }
+
 
 /**
  * 处理 /api/v1/upload 端点 - Push 数据
@@ -325,7 +346,7 @@ export async function handleClose(
 }
 
 /**
- * 处理上游读取
+ * 处理上游读取，数据就绪后通过 notifyData 唤醒等待中的 /stream 长轮询。
  */
 async function handleUpstreamRead(session: any): Promise<void> {
   if (!session.upstreamSocket) return;
@@ -337,15 +358,21 @@ async function handleUpstreamRead(session: any): Promise<void> {
       const { done, value } = await reader.read();
       if (done) break;
 
-      // 加密数据
+      // 加密数据后，通过 notifyData 推入 pullBuffer 并唤醒 /stream
       const encrypted = session.aead.encrypt(value);
       if (encrypted) {
-        session.pullBuffer.push(encrypted);
+        notifyData(session, encrypted);
       }
     }
   } catch (err) {
     console.error('[Upstream] Read error:', err);
   } finally {
     session.closed = true;
+    // 确保等待中的 /stream 能感知到 session 已关闭
+    if (session.dataNotify) {
+      const fn = session.dataNotify;
+      session.dataNotify = null;
+      fn();
+    }
   }
 }
