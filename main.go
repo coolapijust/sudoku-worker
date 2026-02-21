@@ -221,21 +221,6 @@ func closeSession(id int32) {
 // ============================================================================
 
 func packHintsToKey(hints [4]uint8) uint32 {
-	if hints[0] > hints[1] {
-		hints[0], hints[1] = hints[1], hints[0]
-	}
-	if hints[2] > hints[3] {
-		hints[2], hints[3] = hints[3], hints[2]
-	}
-	if hints[0] > hints[2] {
-		hints[0], hints[2] = hints[2], hints[0]
-	}
-	if hints[1] > hints[3] {
-		hints[1], hints[3] = hints[3], hints[1]
-	}
-	if hints[1] > hints[2] {
-		hints[1], hints[2] = hints[2], hints[1]
-	}
 	return uint32(hints[0])<<24 | uint32(hints[1])<<16 | uint32(hints[2])<<8 | uint32(hints[3])
 }
 
