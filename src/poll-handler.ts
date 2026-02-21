@@ -249,7 +249,10 @@ export async function handleUpload(
       offset += chunk.length;
     }
 
+    const sample = new TextDecoder().decode(totalRaw.slice(0, 100));
     console.log(`[Upload] Total raw ASCII hints: ${totalRaw.length} bytes`);
+    console.log(`[Upload] Sample (first 100 chars): ${sample}`);
+    console.log(`[Upload] Starts with SUDOKU? ${sample.startsWith('SUDOKU')}`);
 
     // 2. 整体去混淆并存入会话缓冲区 (Poll 模式必须流式处理)
     const unmasked = session.aead.unmask(totalRaw);
