@@ -16,11 +16,7 @@ LAYOUT_MODE = "ascii"
 KEY_DERIVE_SALT = "sudoku-v2-edge-salt"
 STANDALONE_PROXY = "true"
 
-# Wasm 模块绑定
-[wasm_modules]
-SUDOKU_WASM = "./sudoku.wasm"
-
-# 告诉 wrangler 如何处理 .wasm 文件导入
+# Wasm 导入规则 (ES 模块 Worker 不需要 [wasm_modules]，直接 import 即可)
 [[rules]]
 type = "CompiledWasm"
 globs = ["**/*.wasm"]
