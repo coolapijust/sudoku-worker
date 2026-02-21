@@ -81,14 +81,13 @@ export default {
 
       console.log(`[DEBUG] ${request.method} ${pathname} from ${request.headers.get('user-agent') || 'unknown'}`);
 
-      // 获取 WASM 实例并重置内存池以防止泄露
+      // 获取 WASM 实例
+      // 注意: 不能调用 arenaReset()! session 和编解码表都在 arena 内存中，
+      // 重置会清空所有 session 状态导致 unmask 返回空数据。
       let wasm: any;
       try {
         const wasmInstance = await getWasmInstance();
         wasm = wasmInstance.exports;
-        if (wasm.arenaReset) {
-          wasm.arenaReset();
-        }
       } catch (err) {
         console.error(`[WASM Error] ${err}`);
         return new Response(`WASM Error: ${err}`, { status: 500 });
