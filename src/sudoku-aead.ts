@@ -7,7 +7,7 @@ export class SudokuAEAD {
     private wasm: any,
     private sessionId: number,
     private key: Uint8Array
-  ) {}
+  ) { }
 
   async encryptAndMask(plaintext: Uint8Array): Promise<Uint8Array> {
     const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -42,19 +42,24 @@ export class SudokuAEAD {
   // 简化的 encrypt/decrypt 方法（用于 poll-handler）
   encrypt(data: Uint8Array): Uint8Array | null {
     try {
-      const ptr = this.wasm.arenaMalloc(data.length);
-      if (!ptr) return null;
-      
+      const inPtr = this.wasm.arenaMalloc(data.length);
+      const outPtr = this.wasm.arenaMalloc(data.length + 16); // AEAD overhead
+      if (!inPtr || !outPtr) return null;
+
       const memory = new Uint8Array(this.wasm.memory.buffer);
-      memory.set(data, ptr);
-      
-      const outPtr = this.wasm.encrypt(this.sessionId, ptr, data.length);
-      const outLen = this.wasm.getOutLen();
-      
-      const result = new Uint8Array(outLen);
-      result.set(memory.subarray(outPtr, outPtr + outLen));
-      
-      this.wasm.arenaFree(ptr);
+      memory.set(data, inPtr);
+
+      const resultLen = this.wasm.aeadEncrypt(this.sessionId, inPtr, data.length, outPtr);
+      if (resultLen === 0) {
+        this.wasm.arenaFree(inPtr);
+        this.wasm.arenaFree(outPtr);
+        return null;
+      }
+
+      const result = new Uint8Array(this.wasm.memory.buffer, outPtr, resultLen).slice();
+
+      this.wasm.arenaFree(inPtr);
+      this.wasm.arenaFree(outPtr);
       return result;
     } catch (e) {
       console.error('[AEAD] Encrypt error:', e);
@@ -64,25 +69,31 @@ export class SudokuAEAD {
 
   decrypt(data: Uint8Array): Uint8Array | null {
     try {
-      const ptr = this.wasm.arenaMalloc(data.length);
-      if (!ptr) return null;
-      
+      const inPtr = this.wasm.arenaMalloc(data.length);
+      const outPtr = this.wasm.arenaMalloc(data.length);
+      if (!inPtr || !outPtr) return null;
+
       const memory = new Uint8Array(this.wasm.memory.buffer);
-      memory.set(data, ptr);
-      
-      const outPtr = this.wasm.decrypt(this.sessionId, ptr, data.length);
-      const outLen = this.wasm.getOutLen();
-      
-      const result = new Uint8Array(outLen);
-      result.set(memory.subarray(outPtr, outPtr + outLen));
-      
-      this.wasm.arenaFree(ptr);
+      memory.set(data, inPtr);
+
+      const resultLen = this.wasm.aeadDecrypt(this.sessionId, inPtr, data.length, outPtr);
+      if (resultLen === 0) {
+        this.wasm.arenaFree(inPtr);
+        this.wasm.arenaFree(outPtr);
+        return null;
+      }
+
+      const result = new Uint8Array(this.wasm.memory.buffer, outPtr, resultLen).slice();
+
+      this.wasm.arenaFree(inPtr);
+      this.wasm.arenaFree(outPtr);
       return result;
     } catch (e) {
       console.error('[AEAD] Decrypt error:', e);
       return null;
     }
   }
+
 
   private maskData(data: Uint8Array): Uint8Array {
     const ptr = this.wasm.arenaMalloc(data.length);
