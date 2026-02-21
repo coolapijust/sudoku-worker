@@ -254,7 +254,7 @@ func decodeTableLookup(key uint32) (uint8, bool) {
 }
 
 func isHintASCII(b uint8) bool {
-	return (b&0xC0) == 0x80
+	return b >= 1 && b <= 4
 }
 
 // ============================================================================
