@@ -223,45 +223,58 @@ export async function handleUpload(
   }
 
   try {
-    const bodyText = await request.text();
-    const lines = bodyText.split('\n').filter(line => line.trim().length > 0);
-
-    if (lines.length === 0) {
+    const rawBody = new Uint8Array(await request.arrayBuffer());
+    if (rawBody.length === 0) {
       return new Response('OK', { status: 200 });
     }
 
-    console.log(`[Upload] Received ${lines.length} lines from client`);
+    // 优先按文本 Base64 模式解析；若不符合则回退为原始二进制模式。
+    // 兼容不同客户端实现，避免因编码方式差异导致 Worker 无法解包。
+    let totalRaw: Uint8Array = rawBody;
+    let parsedAsBase64 = false;
+    const bodyText = new TextDecoder().decode(rawBody);
+    const lines = bodyText.split('\n').filter(line => line.trim().length > 0);
 
-    // 1. Base64 解码所有行并合并为原始混淆数据
-    // 客户端: 明文 → AEAD加密 → 添加帧头 → Sudoku mask → Base64编码 → 按行发送
-    const decodedChunks: Uint8Array[] = [];
-    let totalDecodedLen = 0;
-    for (const line of lines) {
-      try {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        const binaryString = atob(trimmed);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
+    if (lines.length > 0) {
+      const decodedChunks: Uint8Array[] = [];
+      let totalDecodedLen = 0;
+      let allLinesBase64Ok = true;
+
+      for (const line of lines) {
+        try {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          const binaryString = atob(trimmed);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          decodedChunks.push(bytes);
+          totalDecodedLen += bytes.length;
+        } catch {
+          allLinesBase64Ok = false;
+          break;
         }
-        decodedChunks.push(bytes);
-        totalDecodedLen += bytes.length;
-      } catch (e) {
-        console.error('[Upload] Base64 decode failed for line:', e);
+      }
+
+      if (allLinesBase64Ok && totalDecodedLen > 0) {
+        totalRaw = new Uint8Array(totalDecodedLen);
+        let offset = 0;
+        for (const chunk of decodedChunks) {
+          totalRaw.set(chunk, offset);
+          offset += chunk.length;
+        }
+        parsedAsBase64 = true;
       }
     }
 
-    const totalRaw = new Uint8Array(totalDecodedLen);
-    let offset = 0;
-    for (const chunk of decodedChunks) {
-      totalRaw.set(chunk, offset);
-      offset += chunk.length;
+    console.log(`[Upload] Received ${rawBody.length} bytes, mode=${parsedAsBase64 ? 'base64' : 'raw'}`);
+    if (parsedAsBase64) {
+      console.log(`[Upload] After Base64 decode: ${totalRaw.length} bytes`);
     }
 
-    // 采样日志：显示 Base64 解码后的原始字节（应为 Sudoku 混淆的 ASCII 提示符）
+    // 采样日志：显示去编码前的原始字节（应为 Sudoku 混淆数据）
     const sampleText = new TextDecoder().decode(totalRaw.slice(0, 100));
-    console.log(`[Upload] After Base64 decode: ${totalRaw.length} bytes`);
     console.log(`[Upload] Decoded sample (first 100 chars): ${sampleText}`);
 
 
